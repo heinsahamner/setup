@@ -65,13 +65,27 @@ install_oh_my_zsh() {
 
 install_zsh_plugins() {
   log_info "Sincronizando plugins Zsh..."
-  ui_spin "Clonando P10k, Autosuggestions e Syntax-Highlighting..." \
-    sudo -H -u "$TARGET_USER" bash -c "
-        ZSH_CUSTOM=\"\$HOME/.oh-my-zsh/custom\"
-        [ ! -d \"\$ZSH_CUSTOM/themes/powerlevel10k\" ] && git clone -q --depth=1 https://github.com/romkatv/powerlevel10k.git \"\$ZSH_CUSTOM/themes/powerlevel10k\"
-        [ ! -d \"\$ZSH_CUSTOM/plugins/zsh-autosuggestions\" ] && git clone -q https://github.com/zsh-users/zsh-autosuggestions \"\$ZSH_CUSTOM/plugins/zsh-autosuggestions\"
-        [ ! -d \"\$ZSH_CUSTOM/plugins/fast-syntax-highlighting\" ] && git clone -q https://github.com/zdharma-continuum/fast-syntax-highlighting \"\$ZSH_CUSTOM/plugins/fast-syntax-highlighting\"
-    "
+  local zsh_custom="$TARGET_HOME/.oh-my-zsh/custom"
+  
+  if [ ! -d "$zsh_custom" ]; then
+    log_error "Oh My Zsh não instalado. Execute install_oh_my_zsh primeiro."
+    return 1
+  fi
+
+  log_info "Clonando plugins no diretório: $zsh_custom"
+  
+  if [ ! -d "$zsh_custom/themes/powerlevel10k" ]; then
+    ui_spin "Clonando powerlevel10k..." sudo -H -u "$TARGET_USER" git clone -q --depth=1 https://github.com/romkatv/powerlevel10k.git "$zsh_custom/themes/powerlevel10k"
+  fi
+  
+  if [ ! -d "$zsh_custom/plugins/zsh-autosuggestions" ]; then
+    ui_spin "Clonando zsh-autosuggestions..." sudo -H -u "$TARGET_USER" git clone -q https://github.com/zsh-users/zsh-autosuggestions "$zsh_custom/plugins/zsh-autosuggestions"
+  fi
+  
+  if [ ! -d "$zsh_custom/plugins/fast-syntax-highlighting" ]; then
+    ui_spin "Clonando fast-syntax-highlighting..." sudo -H -u "$TARGET_USER" git clone -q https://github.com/zdharma-continuum/fast-syntax-highlighting "$zsh_custom/plugins/fast-syntax-highlighting"
+  fi
+  
   log_success "Plugins Zsh prontos."
 }
 
