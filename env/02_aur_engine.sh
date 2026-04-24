@@ -1,14 +1,22 @@
 #!/bin/bash
 # ==========================================
-# 2. MOTOR DO AUR (Solução Definitiva Root/Makepkg via Gum)
+# env/02_aur_engine.sh — integração com AUR (Arch)
+#
+# Responsabilidades
+# - Criar usuário temporário de build (`aur_builder`) com permissões para compilar pacotes
+# - Instalar o helper `yay` quando ausente
+# - Expor `aur_install` como wrapper de instalação via AUR
+#
+# Observações
+# - Este módulo é aplicável apenas quando `PM=pacman`.
 # ==========================================
 
-# Cria um usuário de sistema apenas para compilar pacotes do AUR
+# Cria um usuário temporário dedicado à compilação (AUR)
 setup_aur_builder() {
   if ! id "aur_builder" &>/dev/null; then
     log_info "Preparando ambiente seguro para o AUR..."
 
-    # Usa um spinner do gum para esconder a criação do usuário
+    # Criação do usuário + sudoers dedicado
     ui_spin "Criando usuário temporário 'aur_builder'..." bash -c "
             useradd -m -G wheel aur_builder
             echo 'aur_builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/aur_builder
@@ -18,9 +26,9 @@ setup_aur_builder() {
   fi
 }
 
-# Instala o yay usando o usuário construtor
+# Instala o yay via makepkg usando o usuário construtor
 install_yay() {
-  # Esconde a instalação das dependências base (caso já estejam instaladas)
+  # Dependências de compilação
   ui_spin "Verificando dependências de compilação..." \
     pacman -S --needed --noconfirm base-devel git sudo
 
@@ -29,15 +37,14 @@ install_yay() {
 
     rm -rf /tmp/yay-install 2>/dev/null || true
 
-    # Clone silencioso com spinner
+    # Clone do PKGBUILD do yay
     ui_spin "Clonando repositório do yay..." \
       git clone -q https://aur.archlinux.org/yay.git /tmp/yay-install
 
     chown -R aur_builder:aur_builder /tmp/yay-install
 
-    # Aqui NÃO usamos spinner porque compilar (makepkg) gera logs importantes
-    # e pode demorar. O usuário precisa ver que o sistema não travou.
-    gum style --foreground 212 "➜ Compilando e instalando yay (isso pode demorar um pouco)..."
+    # A compilação pode levar tempo; manter a saída visível.
+    ui_style --foreground 212 "➜ Compilando e instalando yay..."
     sudo -H -u aur_builder bash -c 'cd /tmp/yay-install && makepkg -si --noconfirm'
 
     rm -rf /tmp/yay-install
@@ -47,10 +54,10 @@ install_yay() {
   fi
 }
 
-# Wrapper universal: Sempre que precisar instalar um pacote do AUR no script
+# Wrapper de instalação via AUR (yay)
 aur_install() {
   if command -v yay >/dev/null 2>&1; then
-    # Destaca visualmente pacotes sendo instalados via AUR
+    # Instalação via usuário construtor (evita build como root)
     ui_style --foreground 226 "📦 [AUR] Instalando pacote(s): $*"
     sudo -H -u aur_builder bash -c "yay -S --needed --noconfirm $*"
   else
@@ -61,7 +68,7 @@ aur_install() {
 cleanup_aur_builder() {
   log_info "Higienizando o sistema..."
 
-  # Usa um spinner para esconder a deleção do usuário temporário
+  # Remove sudoers e usuário temporário
   ui_spin "Removendo usuário construtor do AUR..." bash -c "
         rm -f /etc/sudoers.d/aur_builder
         userdel -r aur_builder 2>/dev/null || true

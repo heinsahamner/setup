@@ -1,12 +1,22 @@
 #!/bin/bash
 # ==========================================
-# 1. CORES, LOGS E DETECÇÃO DE USUÁRIO/SISTEMA (TUI via Gum)
+# env/01_env_utils.sh — utilitários compartilhados
+#
+# Fornece:
+# - UI/logs (gum quando disponível e com TTY; fallback texto caso contrário)
+# - Detecção de usuário alvo (TARGET_USER/TARGET_HOME)
+# - Detecção de gerenciador de pacotes e comandos de install/update
+# - Helpers: is_pkg_installed, wait_for_network
 # ==========================================
 
 # ---------------------------------------------------------------
-# UI helpers (fallback quando gum não existe)
+# UI helpers
 # ---------------------------------------------------------------
-have_gum() { command -v gum >/dev/null 2>&1; }
+have_gum() {
+  command -v gum >/dev/null 2>&1 || return 1
+  # gum choose/confirm exigem TTY; em heredoc/pipe a execução deve cair no fallback.
+  [ -t 0 ] && [ -t 1 ]
+}
 
 ui_style() {
   # usage: ui_style <gum_args...> -- <message>
@@ -30,8 +40,8 @@ ui_spin() {
   fi
 }
 
-# Garante que o gum exista quando o fluxo exige TUI.
-# Se falhar, o script continua com fallback (sem TUI rica).
+# Instala gum quando possível.
+# Observação: a execução não depende de gum; sem ele o script opera em modo texto.
 ensure_gum() {
   if have_gum; then
     return 0
@@ -47,17 +57,14 @@ ensure_gum() {
   fi
 }
 
-# Mantendo as variáveis legadas caso algum script antigo ainda precise delas,
-# mas as funções abaixo agora utilizam o Gum para renderização.
+# Variáveis legadas (ANSI). Mantidas para compatibilidade.
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# ---------------------------------------------------------------
-# Funções de Log refatoradas para Gum
-# ---------------------------------------------------------------
+# Logs (UI-agnostic)
 log_info() {
   ui_style --foreground 39 "🔹 $1"
 }
@@ -75,14 +82,14 @@ log_error() {
 }
 
 # ---------------------------------------------------------------
-# Rede: checagem/retry simples para downloads
+# Rede: checagem básica com tentativas
 # ---------------------------------------------------------------
 wait_for_network() {
   # usage: wait_for_network [retries] [sleep_seconds]
   local retries="${1:-12}"
   local delay="${2:-2}"
 
-  # Sem curl, não dá pra validar HTTPS de forma confiável.
+  # Sem curl, não há verificação HTTPs/DNS; assume OK.
   if ! command -v curl >/dev/null 2>&1; then
     return 0
   fi
@@ -95,12 +102,12 @@ wait_for_network() {
     sleep "$delay"
   done
 
-  log_warn "Rede instável/indisponível (tentativas: $retries). Algumas instalações podem falhar."
+  log_warn "Rede instável/indisponível (tentativas: $retries). Instalações online podem falhar."
   return 1
 }
 
 # ---------------------------------------------------------------
-# Detecção de Usuário
+# Detecção de usuário alvo
 # ---------------------------------------------------------------
 detect_target_user() {
   # Evita instalar dotfiles na pasta /root se o script for chamado via sudo
@@ -111,7 +118,7 @@ detect_target_user() {
     TARGET_USER="root"
     TARGET_HOME="/root"
 
-    # Alerta visual grande para execução como root puro
+    # Execução como root puro implica configs em /root.
     ui_style \
       --foreground 214 --border-foreground 214 --border double \
       --margin "1 1" --padding "1 2" \
@@ -123,7 +130,7 @@ detect_target_user() {
 }
 
 # ---------------------------------------------------------------
-# Helpers de package manager (arrays para evitar eval)
+# Helpers de package manager (arrays; evita eval)
 # ---------------------------------------------------------------
 pm_update() { "${UPDATE_CMD[@]}"; }
 pm_install() { "${INSTALL_CMD[@]}" "$@"; }
@@ -139,7 +146,7 @@ is_pkg_installed() {
 }
 
 # ---------------------------------------------------------------
-# Detecção do Sistema / Gerenciador de Pacotes
+# Detecção do gerenciador de pacotes
 # ---------------------------------------------------------------
 detect_package_manager() {
   # Adicionado ferramentas modernas: btop, fd, zoxide, tldr

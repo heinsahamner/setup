@@ -1,4 +1,20 @@
 #!/bin/bash
+#
+# arch.sh — Instalador automatizado do Arch Linux (UEFI)
+#
+# Objetivo
+# - Particionar, formatar e montar o disco em /mnt
+# - Instalar o sistema base via pacstrap
+# - Configurar o sistema via arch-chroot (locale, vconsole, usuários, rede, bootloader)
+# - Provisionar pós-setup baixando e executando os scripts em env/ a partir do repositório
+#
+# Requisitos
+# - Execução em ambiente live do Arch Linux
+# - Boot em modo UEFI (ESP montada em /boot)
+# - Conectividade de rede para downloads (pacman/curl)
+#
+# Avisos
+# - Este script APAGA o disco selecionado.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -31,6 +47,7 @@ cleanup_mounts() {
 trap cleanup_mounts EXIT
 
 wait_for_network() {
+  # Verifica conectividade de rede (DNS + HTTPS) com tentativas.
   # usage: wait_for_network [retries] [sleep_seconds]
   local retries="${1:-15}"
   local delay="${2:-2}"
@@ -48,7 +65,7 @@ wait_for_network() {
     sleep "$delay"
   done
 
-  ui_style --foreground 214 "⚠️  Rede instável. Vou continuar, mas downloads podem falhar."
+  ui_style --foreground 214 "⚠️  Rede instável. Continuação com risco de falhas em downloads."
   return 1
 }
 
@@ -80,7 +97,7 @@ usage() {
   cat <<EOF
 Uso: $SCRIPT_NAME
 
-Instalador interativo (TUI) para Arch Linux.
+Instalador automatizado do Arch Linux (TUI quando disponível).
 
 Notas:
 - Este script APAGA o disco selecionado.
@@ -99,7 +116,7 @@ ensure_gum
 ui_title "Archinst, por heinsahamner"
 sleep 1
 
-# 1. Verificação de root
+# Verificação de privilégios
 need_root
 
 ui_style --foreground "$ACCENT_COLOR" "Selecione o layout de teclado (keymap):"
@@ -152,7 +169,7 @@ choose_disk() {
 
 disco="$(choose_disk)"
 
-# 3. Coleta de Dados com Arrays
+# Coleta de parâmetros de particionamento
 ui_style --foreground "$ACCENT_COLOR" "Quantas partições deseja criar?"
 if have gum; then
   num_parts="$(gum input --placeholder "Ex: 2, 3, 4...")"
@@ -409,16 +426,16 @@ validate_layout() {
 
 validate_layout
 
-# 4. Confirmação
+# Confirmação final antes de particionar/formatar
 clear
-ui_style --foreground 220 "Tudo pronto. Respire fundo."
+ui_style --foreground 220 "Parâmetros coletados. Confirme para aplicar as alterações no disco."
 if ! ui_confirm "Confirmar o particionamento de /dev/$disco e formatar AGORA?"; then
   ui_style --foreground 196 "Instalação cancelada."
   exit 0
 fi
 
 clear
-# 5. Execução do Particionamento
+# Particionamento (GPT)
 if have gum; then gum spin --spinner dot --title "[1/5] Limpando assinaturas do disco..." -- sleep 1; else sleep 1; fi
 wipefs -a "/dev/$disco" >/dev/null 2>&1
 
@@ -445,7 +462,7 @@ else
   printf '%s' "$sfdisk_script" | sfdisk "/dev/$disco" >/dev/null 2>&1
 fi
 
-# 6. Formatação e Montagem
+# Formatação e montagem em /mnt
 ui_style --foreground "$ACCENT_COLOR" "[2/5] Formatando e Montando em /mnt..."
 
 get_part_path() {
@@ -547,7 +564,7 @@ if ! mountpoint -q /mnt/boot; then
   die "A partição EFI precisa estar montada em /boot (ponto /boot). Selecione /boot para a partição EFI."
 fi
 
-# 7. Instalação Base com pacstrap
+# Instalação do sistema base via pacstrap
 ui_style --foreground "$ACCENT_COLOR" "[3/5] Iniciando o pacstrap. Isso pode demorar um pouco..."
 sleep 2
 
@@ -573,7 +590,7 @@ pacstrap -K /mnt "${pacotes[@]}"
 
 if have gum; then gum spin --spinner dot --title "Gerando fstab..." -- sh -c "genfstab -U /mnt >> /mnt/etc/fstab"; else genfstab -U /mnt >> /mnt/etc/fstab; fi
 
-# 8. Configuração dentro do ambiente novo via Heredoc (EOF)
+# Configuração do sistema via arch-chroot
 ui_style --foreground "$ACCENT_COLOR" "[4/5] Entrando na Matrix (arch-chroot) para configurações finais..."
 sleep 3
 
@@ -604,7 +621,7 @@ echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
 echo -e "\e[35m-> Habilitando a rede...\e[0m"
 systemctl enable NetworkManager > /dev/null 2>&1
 
-echo -e "\e[35m-> Instalando o GRUB...\e[0m"
+echo -e "\e[35m-> Instalando bootloader...\e[0m"
 ROOT_DEV=\$(findmnt -no SOURCE /)
 ROOT_UUID=\$(blkid -s UUID -o value "\$ROOT_DEV")
 ROOT_FSTYPE=\$(findmnt -no FSTYPE /)
@@ -687,12 +704,29 @@ else
   echo -e "\e[35m-> Desktop: nenhum (somente CLI).\e[0m"
 fi
 
-echo -e "\e[35m-> Passando para o setup de ambiente...\e[0m"
-curl -fsSL -o /env-setup.sh https://raw.githubusercontent.com/heinsahamner/archinst/refs/heads/main/term-config.sh
-chmod +x /env-setup.sh
+echo -e "\e[35m-> Provisionamento do ambiente (env/)...\e[0m"
+ENV_BASE_URL="https://raw.githubusercontent.com/heinsahamner/setup/refs/heads/main/env"
+ENV_DIR="/opt/heinsahamner-setup/env"
+
+mkdir -p "\$ENV_DIR"
+for f in 00_install.sh 01_env_utils.sh 02_aur_engine.sh 03_packages.sh 04_ricing.sh; do
+  echo "-> Baixando env/\$f..."
+  curl -fsSL -o "\$ENV_DIR/\$f" "\$ENV_BASE_URL/\$f"
+  chmod +x "\$ENV_DIR/\$f" || true
+done
+
+# Executa o env setup durante a instalação, mas direcionando as configs para o usuário criado.
+# Como estamos rodando como root (sem sudo), exportamos SUDO_USER para o detect_target_user.
+export SUDO_USER="$usuario"
+
+echo -e "\e[35m-> Executando env/00_install.sh (root, alvo: \$SUDO_USER)...\e[0m"
+bash "\$ENV_DIR/00_install.sh"
+
+# Atalho para reexecutar depois, caso o usuário queira
+ln -sf "\$ENV_DIR/00_install.sh" /env-setup.sh
 EOF
 
-# 9. Finalização Segura
+# Desmontagem de /mnt (término)
 if have gum; then gum spin --spinner dot --title "[5/5] Finalizando e desmontando..." -- umount -R /mnt; else umount -R /mnt; fi
 
 clear

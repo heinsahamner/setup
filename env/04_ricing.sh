@@ -1,12 +1,20 @@
 #!/bin/bash
 # ==========================================
-# 4. RICING: TEMAS E CONFIGURAÇÕES VISUAIS (TUI via Gum)
+# env/04_ricing.sh — ricing e configurações do perfil do usuário
+#
+# Escopo
+# - Editor: LazyVim
+# - Shell: Oh My Zsh + plugins + .zshrc
+# - Visual: temas/cursor, fontes e configurações de terminal
+#
+# Notas
+# - As alterações são aplicadas no usuário alvo (TARGET_USER/TARGET_HOME), não no root.
 # ==========================================
 
 install_lazyvim() {
   if [ ! -d "$TARGET_HOME/.config/nvim/.git" ]; then
     log_info "Configurando Neovim (LazyVim)..."
-    # Usamos sudo -u para garantir que os arquivos pertençam ao TARGET_USER
+    # Aplica no contexto do usuário alvo.
     ui_spin "Baixando e aplicando template LazyVim..." \
       sudo -H -u "$TARGET_USER" bash -c '
             mv ~/.config/nvim ~/.config/nvim.bak 2>/dev/null || true
@@ -114,7 +122,7 @@ EOF
 }
 
 install_extra_terminals() {
-  # Terminais extras são opcionais; este helper tenta instalar sem quebrar o fluxo.
+  # Terminais extras são opcionais; falhas não devem interromper o ricing.
   local pkgs=("$@")
   local p
   for p in "${pkgs[@]}"; do
@@ -128,7 +136,7 @@ install_extra_terminals() {
 }
 
 setup_kitty_extra_themes() {
-  # Mantém o kitty.conf atual intacto (padrão) e só disponibiliza temas extras.
+  # Mantém o kitty.conf padrão intacto e disponibiliza temas extras via arquivos separados.
   log_info "Instalando temas extras para Kitty (sem alterar o padrão)..."
   sudo -H -u "$TARGET_USER" bash -c '
         mkdir -p ~/.config/kitty/themes
@@ -160,7 +168,7 @@ EOF
 }
 
 setup_alacritty() {
-  # Cria um alacritty.toml com import de tema. (Alacritty recente prefere TOML)
+  # Gera alacritty.toml e temas locais (formato TOML).
   local theme_id="${1:-neon}"
   local theme_file=""
   case "$theme_id" in
@@ -220,7 +228,7 @@ cyan    = \"#8ec07c\"
 white   = \"#ebdbb2\"
 EOF
 
-        # Se existir config anterior, salva backup uma vez.
+        # Preserva configuração existente (backup único).
         if [ -f \"\$HOME/.config/alacritty/alacritty.toml\" ] && [ ! -f \"\$HOME/.config/alacritty/alacritty.toml.bak\" ]; then
           cp -f \"\$HOME/.config/alacritty/alacritty.toml\" \"\$HOME/.config/alacritty/alacritty.toml.bak\"
         fi
@@ -254,7 +262,7 @@ setup_wezterm() {
         set -e
         mkdir -p \"\$HOME/.config/wezterm\"
 
-        # Backup único
+        # Preserva configuração existente (backup único).
         if [ -f \"\$HOME/.config/wezterm/wezterm.lua\" ] && [ ! -f \"\$HOME/.config/wezterm/wezterm.lua.bak\" ]; then
           cp -f \"\$HOME/.config/wezterm/wezterm.lua\" \"\$HOME/.config/wezterm/wezterm.lua.bak\"
         fi
@@ -273,7 +281,7 @@ return {
 }
 EOF
 
-        # substitui placeholder sem depender de sed -i GNU/BSD nuances
+        # Substitui placeholder sem depender de sed -i.
         tmpfile=\"\$HOME/.config/wezterm/wezterm.lua.tmp\"
         sed \"s/__COLOR_SCHEME__/$scheme/g\" \"\$HOME/.config/wezterm/wezterm.lua\" > \"\$tmpfile\"
         mv -f \"\$tmpfile\" \"\$HOME/.config/wezterm/wezterm.lua\"
@@ -336,7 +344,7 @@ bright6=8ec07c
 bright7=ebdbb2
 EOF
 
-        # Backup único
+        # Preserva configuração existente (backup único).
         if [ -f \"\$HOME/.config/foot/foot.ini\" ] && [ ! -f \"\$HOME/.config/foot/foot.ini.bak\" ]; then
           cp -f \"\$HOME/.config/foot/foot.ini\" \"\$HOME/.config/foot/foot.ini.bak\"
         fi
@@ -354,7 +362,7 @@ EOF
 }
 
 setup_terminals() {
-  # Kitty permanece como padrão e é sempre configurado via setup_kitty (intacto).
+  # Kitty é o terminal padrão e é sempre configurado via setup_kitty (sem alterações no tema atual).
   setup_kitty
   setup_kitty_extra_themes
 
@@ -401,7 +409,7 @@ setup_terminals() {
   fi
 
   if printf '%s\n' "$choices" | grep -Fqx "$OPT_FOOT"; then
-    # Em algumas distros, foot-terminfo é separado; tentamos também sem quebrar.
+    # Em algumas distros, foot-terminfo é um pacote separado.
     install_extra_terminals foot foot-terminfo
 
     local foot_theme_choice="Neon (igual Kitty)"
@@ -418,7 +426,7 @@ setup_terminals() {
 }
 
 setup_terminal_font() {
-  # Suporte legado pro alacritty caso o usuário instale depois
+  # Compatibilidade: cria/atualiza um alacritty.yml mínimo (legado).
   sudo -H -u "$TARGET_USER" bash -c '
         mkdir -p ~/.config/alacritty
         touch ~/.config/alacritty/alacritty.yml
@@ -429,7 +437,7 @@ setup_terminal_font() {
 generate_zshrc() {
   log_info "Gerando ~/.zshrc robusto e moderno..."
 
-  # Criamos o arquivo na pasta temporaria para injetar variaveis root-level e depois movemos pro usuario
+  # Gera o arquivo em /tmp e move para o HOME do usuário alvo.
   cat >/tmp/.zshrc_temp <<'EOF'
 # =================== heinsahamner env ===================
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
@@ -465,7 +473,7 @@ alias venv="python3 -m venv .venv && source .venv/bin/activate"
 
 EOF
 
-  # Adiciona comandos dinâmicos dependentes da Distro
+  # Injeta aliases específicos do gerenciador de pacotes.
   cat >>/tmp/.zshrc_temp <<EOF
 alias upd="${ZSH_UPD}"
 alias rem="${ZSH_REM}"
@@ -487,11 +495,11 @@ ftext() {
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 EOF
 
-  # Move para o diretório do alvo e ajusta posse
+  # Move para o diretório do usuário alvo e ajusta posse.
   mv /tmp/.zshrc_temp "$TARGET_HOME/.zshrc"
   chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.zshrc"
 
-  # Destaca a criação do arquivo principal de configuração
+  # Notificação de conclusão.
   ui_style \
     --foreground 82 --border-foreground 82 --border rounded \
     --margin "1 0" --padding "0 1" \

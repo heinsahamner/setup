@@ -1,18 +1,24 @@
 #!/bin/bash
 # ===============================================================
-# heinsahamner env setup - SCRIPT RAIZ (Controlador TUI)
+# env/00_install.sh — Orquestrador do provisionamento do ambiente
+#
+# Responsabilidades
+# - Detectar gerenciador de pacotes e usuário alvo (TARGET_USER/TARGET_HOME)
+# - Executar módulos de instalação (base, AUR, extras, ricing) de forma idempotente
+# - Preferir TUI via gum quando disponível e com TTY; caso contrário usar fallback
+#
+# Requisitos
+# - Execução como root (sudo)
 # ===============================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Importa os módulos (utils primeiro para fallback do gum)
+# Módulos (utils primeiro para UI/logs e fallback do gum)
 source "$SCRIPT_DIR/01_env_utils.sh"
 ensure_gum || true
 
-# ---------------------------------------------------------------
-# Validação de Root com Gum
-# ---------------------------------------------------------------
+# Pré-condição: root
 if [ "$EUID" -ne 0 ]; then
   ui_style \
     --foreground 196 --border-foreground 196 --border double \
@@ -25,9 +31,7 @@ source "$SCRIPT_DIR/02_aur_engine.sh"
 source "$SCRIPT_DIR/03_packages.sh"
 source "$SCRIPT_DIR/04_ricing.sh"
 
-# ---------------------------------------------------------------
-# Cabeçalho TUI
-# ---------------------------------------------------------------
+# Identificação / cabeçalho
 clear
 ui_style \
   --foreground 212 --border-foreground 212 --border double \
@@ -40,9 +44,7 @@ detect_target_user
 ui_style --foreground 75 "✅ Gerenciador: $PM | Usuário alvo: $TARGET_USER"
 echo ""
 
-# ---------------------------------------------------------------
-# Menu Interativo (TUI)
-# ---------------------------------------------------------------
+# Seleção de etapas (interativo quando possível)
 OPT_BASE="1. 📦 Pacotes Base e Atualização"
 OPT_AUR="2. 🛠️  Motor AUR (Apenas Arch)"
 OPT_EXTRA="3. 🧰 Ferramentas Extras (VSCode, Ventoy, NVM, etc)"
@@ -56,27 +58,25 @@ if have_gum; then
     --selected="$OPT_BASE,$OPT_AUR,$OPT_EXTRA,$OPT_RICE" \
     "$OPT_BASE" "$OPT_AUR" "$OPT_EXTRA" "$OPT_RICE")
 else
-  # fallback sem TUI: executa tudo
+  # Fallback sem TUI: executa todas as etapas
   CHOICES="$OPT_BASE"$'\n'"$OPT_AUR"$'\n'"$OPT_EXTRA"$'\n'"$OPT_RICE"
 fi
 
-# Se o usuário não selecionou nada, encerra graciosamente
+# Caso nenhuma etapa seja selecionada, encerra sem erro
 if [ -z "$CHOICES" ]; then
   ui_style --foreground 196 "Nenhuma etapa selecionada. Operação cancelada."
   exit 0
 fi
 
-# Confirmação final antes de rodar
+# Confirmação final (somente em modo interativo)
 if have_gum; then
   gum confirm "Iniciar a instalação com os módulos selecionados?" || exit 0
 fi
 clear
 
-# ---------------------------------------------------------------
-# Execução Baseada na Seleção
-# ---------------------------------------------------------------
+# Execução por etapa
 
-# 1. Setup de Pacotes Base
+# Etapa 1: atualização + pacotes base
 if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_BASE"; then
   ui_style --background 62 --foreground 232 --bold --padding "0 1" --margin "1 0" " PASSO 1: Atualização e Pacotes Base "
   ui_style --foreground 39 "➜ Atualizando repositórios ($PM)..."
@@ -86,7 +86,7 @@ if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_BASE"; then
   install_base_packages
 fi
 
-# 2. Setup do Motor AUR (Se for Arch)
+# Etapa 2: motor AUR (somente Arch/pacman)
 if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_AUR"; then
   ui_style --background 208 --foreground 232 --bold --padding "0 1" --margin "1 0" " PASSO 2: Setup Motor AUR "
   if [ "$PM" = "pacman" ]; then
@@ -97,7 +97,7 @@ if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_AUR"; then
   fi
 fi
 
-# 3. Instalação de Ferramentas Extras
+# Etapa 3: ferramentas extras
 if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_EXTRA"; then
   ui_style --background 35 --foreground 232 --bold --padding "0 1" --margin "1 0" " PASSO 3: Ferramentas Extras "
   install_vscode
@@ -111,7 +111,7 @@ if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_EXTRA"; then
   install_obs_pacman
 fi
 
-# 4. Ricing e Configurações
+# Etapa 4: ricing e configurações
 if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_RICE"; then
   ui_style --background 129 --foreground 232 --bold --padding "0 1" --margin "1 0" " PASSO 4: Ricing e Configurações "
   install_lazyvim
@@ -123,9 +123,7 @@ if printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_RICE"; then
   generate_zshrc
 fi
 
-# ---------------------------------------------------------------
-# Limpeza e Finalização
-# ---------------------------------------------------------------
+# Finalização / limpeza
 ui_style --background 240 --foreground 232 --bold --padding "0 1" --margin "1 0" " 🧹 FINALIZANDO: Ajustes e Limpeza "
 
 if [ "$PM" = "pacman" ] && printf '%s\n' "$CHOICES" | grep -Fqx "$OPT_AUR"; then

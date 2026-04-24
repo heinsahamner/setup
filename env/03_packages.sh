@@ -1,6 +1,12 @@
 #!/bin/bash
 # ==========================================
-# 3. INSTALADORES DE PACOTES E FERRAMENTAS (TUI via Gum)
+# env/03_packages.sh — instaladores de pacotes e ferramentas
+#
+# Escopo
+# - Instala pacotes base (detectados via env/01_env_utils.sh)
+# - Instala ferramentas opcionais (VS Code, Ventoy, NVM, yt-dlp, Flatpak/Flathub, spotify-launcher)
+# - Provisiona serviços quando aplicável (ex.: bluetooth)
+# - Mantém idempotência: tenta evitar reinstalações e falhas fatais em itens opcionais
 # ==========================================
 
 install_base_packages() {
@@ -67,7 +73,7 @@ install_ventoy() {
     if [ "$PM" = "pacman" ]; then
         aur_install ventoy-bin
     else
-        # Usamos o spinner porque baixar do github e extrair o tar é silencioso e pode demorar
+        # Download/extração são operações silenciosas; a UI apresenta progresso.
         ui_spin "Buscando última versão no GitHub, baixando e extraindo..." bash -c '
             vt_tmp=$(mktemp -d)
             latest_url=$(curl -fsSL https://api.github.com/repos/ventoy/Ventoy/releases/latest | jq -r ".assets[] | select(.browser_download_url | test(\"linux.*tar.gz$\")) | .browser_download_url" | head -n1)
@@ -110,7 +116,7 @@ install_ytdlp() {
             ui_spin "Instalando via pip para o usuário $TARGET_USER..." \
                 sudo -H -u "$TARGET_USER" bash -c 'python3 -m pip install --user yt-dlp --break-system-packages' || \
                 ui_style --foreground 214 --border-foreground 214 --border rounded --padding "0 1" \
-                "⚠️ Aviso PEP 668: A instalação do yt-dlp via pip falhou. Pode ser necessária instalação manual."
+                "⚠️ PEP 668: instalação via pip falhou; pode ser necessária ação manual."
             
             [ -x "$TARGET_HOME/.local/bin/yt-dlp" ] && log_success "yt-dlp instalado."
         fi
@@ -128,7 +134,7 @@ install_flatpak() {
         log_success "Flatpak instalado."
     fi
 
-    # Flathub (system-wide). Evita duplicar.
+    # Flathub (system-wide).
     if command -v flatpak >/dev/null 2>&1; then
         wait_for_network 8 2 || true
         if ! flatpak remote-list --system 2>/dev/null | awk '{print $1}' | grep -Fxq flathub; then
@@ -150,7 +156,7 @@ install_flatpaks() {
     log_info "Selecionando Flatpaks essenciais..."
     wait_for_network 8 2 || true
 
-    # Labels amigáveis (menu) -> App IDs (Flathub)
+    # Opções de menu -> App IDs (Flathub)
     local OPT_STEAM="Steam"
     local OPT_DISCORD="Discord"
     local OPT_OBSIDIAN="Obsidian"
@@ -169,7 +175,7 @@ install_flatpaks() {
             return
         fi
     else
-        # fallback sem TUI: instala todos
+        # Fallback sem TUI: instala todos
         selected="$OPT_STEAM"$'\n'"$OPT_DISCORD"$'\n'"$OPT_OBSIDIAN"$'\n'"$OPT_MISSION_CENTER"$'\n'"$OPT_LIBREOFFICE"$'\n'"$OPT_OKULAR"
     fi
 
@@ -183,7 +189,7 @@ install_flatpaks() {
     if printf '%s\n' "$selected" | grep -Fqx "$OPT_LIBREOFFICE"; then apps+=(org.libreoffice.LibreOffice); fi
     if printf '%s\n' "$selected" | grep -Fqx "$OPT_OKULAR"; then apps+=(org.kde.okular); fi
 
-    # Usar system install evita “sumir” pro usuário alvo.
+    # Instalação system-wide (não depende do perfil do usuário).
     for app in "${apps[@]}"; do
         if flatpak info --system "$app" >/dev/null 2>&1; then
             ui_style --foreground 245 "⏭️  Flatpak já instalado: $app"
@@ -238,7 +244,7 @@ install_obs_pacman() {
 
     log_info "Instalando OBS Studio (pacman) + plugins..."
 
-    # Instalação resiliente: tenta pacote a pacote para não quebrar o passo inteiro.
+    # Instalação resiliente: processa pacote a pacote para reduzir falhas globais.
     local pkgs=(
         obs-studio
         obs-plugin-obs-websocket
