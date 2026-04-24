@@ -66,12 +66,12 @@ install_oh_my_zsh() {
 install_zsh_plugins() {
   log_info "Sincronizando plugins Zsh..."
   ui_spin "Clonando P10k, Autosuggestions e Syntax-Highlighting..." \
-    sudo -H -u "$TARGET_USER" bash -c '
-        ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
-        [ ! -d "$ZSH_CUSTOM/themes/powerlevel10k" ] && git clone -q --depth=1 https://github.com/romkatv/powerlevel10k.git "$ZSH_CUSTOM/themes/powerlevel10k"
-        [ ! -d "$ZSH_CUSTOM/plugins/zsh-autosuggestions" ] && git clone -q https://github.com/zsh-users/zsh-autosuggestions "$ZSH_CUSTOM/plugins/zsh-autosuggestions"
-        [ ! -d "$ZSH_CUSTOM/plugins/fast-syntax-highlighting" ] && git clone -q https://github.com/zdharma-continuum/fast-syntax-highlighting "$ZSH_CUSTOM/plugins/fast-syntax-highlighting"
-    '
+    sudo -H -u "$TARGET_USER" bash -c "
+        ZSH_CUSTOM=\"\$HOME/.oh-my-zsh/custom\"
+        [ ! -d \"\$ZSH_CUSTOM/themes/powerlevel10k\" ] && git clone -q --depth=1 https://github.com/romkatv/powerlevel10k.git \"\$ZSH_CUSTOM/themes/powerlevel10k\"
+        [ ! -d \"\$ZSH_CUSTOM/plugins/zsh-autosuggestions\" ] && git clone -q https://github.com/zsh-users/zsh-autosuggestions \"\$ZSH_CUSTOM/plugins/zsh-autosuggestions\"
+        [ ! -d \"\$ZSH_CUSTOM/plugins/fast-syntax-highlighting\" ] && git clone -q https://github.com/zdharma-continuum/fast-syntax-highlighting \"\$ZSH_CUSTOM/plugins/fast-syntax-highlighting\"
+    "
   log_success "Plugins Zsh prontos."
 }
 
