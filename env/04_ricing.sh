@@ -51,16 +51,9 @@ install_themes_and_cursors() {
 
 install_oh_my_zsh() {
   if [ ! -d "$TARGET_HOME/.oh-my-zsh" ]; then
-    log_info "Instalando Oh My Zsh em $TARGET_HOME..."
-    (
-      set -e
-      sudo -H -u "$TARGET_USER" bash -c '
-        export RUNZSH=no
-        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-      '
-    ) || {
-      log_warn "Oh My Zsh install returned non-zero"
-    }
+    log_info "Instalando Oh My Zsh..."
+    export RUNZSH=no
+    sudo -H -u "$TARGET_USER" bash -c 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended'
     log_success "Oh My Zsh instalado!"
   else
     ui_style --foreground 245 "⏭️  Oh My Zsh já instalado. Pulando..."
@@ -68,83 +61,124 @@ install_oh_my_zsh() {
 }
 
 install_zsh_plugins() {
-  log_info "Sincronizando plugins Zsh..."
   local zsh_custom="$TARGET_HOME/.oh-my-zsh/custom"
   
-  log_info "Usando diretório: $zsh_custom"
+  log_info "Verificando plugins e temas do Zsh..."
   
-  if [ ! -d "$zsh_custom" ]; then
-    log_error "Oh My Zsh não instalado em $zsh_custom. Execute install_oh_my_zsh primeiro."
-    return 1
-  fi
+  [ ! -d "$zsh_custom/themes/powerlevel10k" ] && sudo -H -u "$TARGET_USER" git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$zsh_custom/themes/powerlevel10k"
+  [ ! -d "$zsh_custom/plugins/zsh-autosuggestions" ] && sudo -H -u "$TARGET_USER" git clone https://github.com/zsh-users/zsh-autosuggestions "$zsh_custom/plugins/zsh-autosuggestions"
+  [ ! -d "$zsh_custom/plugins/fast-syntax-highlighting" ] && sudo -H -u "$TARGET_USER" git clone https://github.com/zdharma-continuum/fast-syntax-highlighting "$zsh_custom/plugins/fast-syntax-highlighting"
   
-  if [ ! -d "$zsh_custom/themes/powerlevel10k" ]; then
-    log_info "Clonando powerlevel10k..."
-    sudo -H -u "$TARGET_USER" git clone -q --depth=1 https://github.com/romkatv/powerlevel10k.git "$zsh_custom/themes/powerlevel10k" || {
-      log_warn "Falha ao clonar powerlevel10k (verifique a rede)"
-    }
-  fi
-  
-  if [ ! -d "$zsh_custom/plugins/zsh-autosuggestions" ]; then
-    log_info "Clonando zsh-autosuggestions..."
-    sudo -H -u "$TARGET_USER" git clone -q https://github.com/zsh-users/zsh-autosuggestions "$zsh_custom/plugins/zsh-autosuggestions" || {
-      log_warn "Falha ao clonar zsh-autosuggestions"
-    }
-  fi
-  
-  if [ ! -d "$zsh_custom/plugins/fast-syntax-highlighting" ]; then
-    log_info "Clonando fast-syntax-highlighting..."
-    sudo -H -u "$TARGET_USER" git clone -q https://github.com/zdharma-continuum/fast-syntax-highlighting "$zsh_custom/plugins/fast-syntax-highlighting" || {
-      log_warn "Falha ao clonar fast-syntax-highlighting"
-    }
-  fi
-  
-  log_success "Plugins Zsh prontos."
+  log_success "Plugins sincronizados."
 }
 
 install_fonts() {
-  log_info "Verificando fontes MesloLGS NF..."
-  ui_spin "Baixando fontes e atualizando cache (fc-cache)..." \
-    sudo -H -u "$TARGET_USER" bash -c '
-        mkdir -p "$HOME/.local/share/fonts"
-        cd "$HOME/.local/share/fonts"
-        fonts=("Regular" "Bold" "Italic" "Bold%20Italic")
-        for f in "${fonts[@]}"; do
-            file="MesloLGS NF ${f//%20/ }.ttf"
-            [ ! -f "$file" ] && curl -sL -o "$file" "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20$f.ttf"
-        done
-        fc-cache -f >/dev/null 2>&1
-    '
-  log_success "Fontes configuradas."
+  log_info "Baixando fontes MesloLGS NF..."
+  local font_dir="$TARGET_HOME/.local/share/fonts"
+  sudo -H -u "$TARGET_USER" bash -c "
+    mkdir -p \"$font_dir\"
+    cd \"$font_dir\"
+    fonts=(\"Regular\" \"Bold\" \"Italic\" \"Bold%20Italic\")
+    for f in \"\${fonts[@]}\"; do
+      file_name=\"MesloLGS NF \${f//%20/ }.ttf\"
+      if [ ! -f \"\$file_name\" ]; then
+        curl -L -o \"\$file_name\" \"https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20\$f.ttf\"
+      fi
+    done
+    fc-cache -f -v
+  "
+  log_success "Fontes instaladas e cache atualizado."
 }
 
 setup_kitty() {
-  log_info "Configurando terminal Kitty (Catppuccin Neon)..."
+  log_info "Configurando terminal Kitty (Neon/Cyberpunk)..."
   sudo -H -u "$TARGET_USER" bash -c '
-        mkdir -p ~/.config/kitty
-        cat > ~/.config/kitty/kitty.conf <<EOF
-font_family MesloLGS NF
-font_size 16
-window_padding_width 0
-hide_window_decorations yes
+    mkdir -p ~/.config/kitty
+    cat > ~/.config/kitty/kitty.conf << '"'"'EOF'"'"'
+#    __ ___ __  __
+#   / //_(_) /_/ /___ __
+#  / ,< / / __/ __/ // /
+# /_/|_|_/\__/\__/\_, /
+#                /___/
+#
+# Configuration
+font_family                 MesloLGS NF
+font_size                   16
+bold_font                   auto
+italic_font                 auto
+bold_italic_font            auto
+remember_window_size        yes
+cursor_blink_interval       0.5
+cursor_stop_blinking_after  1
+scrollback_lines            2000
+wheel_scroll_min_lines      1
+enable_audio_bell           no
+window_padding_width        0
+hide_window_decorations     yes
+confirm_os_window_close     0
+selection_foreground        none
+selection_background        none
+cursor_trail 1
+
+# ==========================================
+# JANELA E DECORAÇÃO (Integração GNOME)
+# ==========================================
+
+# Forçar a renderização correta em X11
+linux_display_server x11
+
+# Melhora a nitidez da fonte em modo de compatibilidade
+force_ltr no
+disable_ligatures never
+
+# Sincronização vertical (evita que a tela "rasgue" ao dar scroll)
+sync_to_monitor yes
+shell_integration enabled
+
+# ==========================================
+# TRANSPARÊNCIA (Otimizada para Blur my Shell)
+# ==========================================
 background_opacity 0.90
 dynamic_background_opacity yes
 
-# Catppuccin Mocha modificado Neon
-foreground #F0F8FF
-background #000000
-selection_background #585b70
-color0 #2b2448
-color1 #ff1f7a
-color2 #00ff72
-color3 #fff700
-color4 #1e90ff
-color5 #ff3cff
-color6 #00f7f7
-color7 #d4bfff
+# ==========================================
+# CORES: CATPPUCCIN MOCHA (Modificado) NEON
+# ==========================================
+foreground              #F0F8FF
+background              #000000
+selection_foreground    #cdd6f4
+selection_background    #585b70
+
+# URL underline color
+url_color               #f5e0dc
+
+# Cores do Kitty - Neon / Cyberpunk
+color0  #2b2448   # fundo escuro profundo
+color1  #ff1f7a   # rosa neon intenso
+color2  #00ff72   # verde elétrico
+color3  #fff700   # amarelo neon
+color4  #1e90ff   # azul neon vibrante
+color5  #ff3cff   # magenta neon
+color6  #00f7f7   # turquesa elétrico
+color7  #d4bfff   # lilás brilhante
+
+color8  #3f3175   # tom médio escuro
+color9  #ff1f7a   # rosa neon
+color10 #00ff72  # verde elétrico
+color11 #fff700  # amarelo neon
+color12 #1e90ff  # azul neon
+color13 #ff3cff  # magenta neon
+color14 #00f7f7  # turquesa elétrico
+color15 #b0a0ff  # lilás brilhante
+
+# ==========================================
+# COMPORTAMENTO
+# ==========================================
+
+# Copiar ao selecionar com o mouse
 copy_on_select yes
 EOF
-    '
+  '
   log_success "Kitty configurado."
 }
 
@@ -462,74 +496,134 @@ setup_terminal_font() {
 }
 
 generate_zshrc() {
-  log_info "Gerando ~/.zshrc robusto e moderno..."
+  log_info "Gerando ~/.zshrc completo..."
 
-  # Gera o arquivo em /tmp e move para o HOME do usuário alvo.
-  cat >/tmp/.zshrc_temp <<'EOF'
+  cat > "$TARGET_HOME/.zshrc" << 'EOF'
 # =================== heinsahamner env ===================
+# Powerlevel10k Instant Prompt
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
+# Variáveis Globais
 export ZSH="$HOME/.oh-my-zsh"
 export PATH="$HOME/.local/bin:$PATH"
 export NVM_DIR="$HOME/.nvm"
 ZSH_THEME="powerlevel10k/powerlevel10k"
+HYPHEN_INSENSITIVE="true"
 
+# Configurações do OMZ
+zstyle ':omz:plugin:colored-man-pages' line-color 'green'
 zstyle ':omz:update' frequency 13
-plugins=(git colored-man-pages npm python pip z web-search fzf sudo extract copyfile copybuffer colorize zsh-autosuggestions fast-syntax-highlighting)
+
+# Plugins
+plugins=(
+  git colored-man-pages npm node python pip z web-search fzf sudo extract 
+  dirhistory copyfile copybuffer colorize zsh-autosuggestions fast-syntax-highlighting
+)
 source $ZSH/oh-my-zsh.sh
 
-# Melhorias de UX com ferramentas modernas
-eval "$(zoxide init zsh)"
-alias cd="z"
+# =================== Aliases ===================
+# Navegação
+alias ..="cd .."
+alias ...="cd ../.."
+alias ....="cd ../../.."
+alias .....="cd ../../../.."
+alias -- -="cd -"
+alias cdc="cd ~/Codes"
+alias cdd="cd ~/Downloads"
+alias cdi="cd ~/Imagens"
+alias cdconf="cd ~/.config"
+alias cdp="cd ~/Pagis"
+alias cdm="cd ~/Músicas"
+alias cdv="cd ~/Vídeos"
+
+# Listagem (eza)
 alias ls="eza --icons --group-directories-first"
 alias ll="eza -lh --icons --group-directories-first --git"
-alias cat="bat --style=plain"
-alias find="fd"
+alias la="eza -aH --icons --group-directories-first"
+alias lt="eza --tree --level=2 --icons"
+alias l="ls"
 
+# Sistema e Pacotes
 alias pereça="sudo shutdown now"
 alias renasça="sudo reboot"
-alias I="btop"
+alias durma="systemctl suspend"
+alias I="fastfetch"
 alias df="duf"
+alias usage="du -sh * | sort -h"
 
+# Desenvolvimento e Utils
 alias editzsh="nano ~/.zshrc"
 alias updzsh="source ~/.zshrc"
 alias kitcon="nano ~/.config/kitty/kitty.conf"
+alias h="history"
+alias py="python3"
 alias venv="python3 -m venv .venv && source .venv/bin/activate"
 
 EOF
 
-  # Injeta aliases específicos do gerenciador de pacotes.
-  cat >>/tmp/.zshrc_temp <<EOF
+  cat >> "$TARGET_HOME/.zshrc" << EOF
 alias upd="${ZSH_UPD}"
 alias rem="${ZSH_REM}"
 alias search="${ZSH_SEARCH}"
-inst() { ${ZSH_INST_FUNC} }
+
+inst() {
+    $ZSH_INST_FUNC
+}
 EOF
 
-  cat >>/tmp/.zshrc_temp <<'EOF'
-ytm() { yt-dlp -x --audio-format mp3 --audio-quality 0 --embed-thumbnail --add-metadata -o "%(title)s.%(ext)s" "$@"; }
-ytv() { yt-dlp -f "bv*+ba/b" --merge-output-format mp4 -o "%(title)s.%(ext)s" "$@"; }
-mkd() { mkdir -p "$1" && cd "$1"; }
+  cat >> "$TARGET_HOME/.zshrc" << 'EOF'
 
-ftext() {
-    rg --line-number --column --color=always "$1" | fzf --ansi --preview 'bat --style=numbers --color=always --highlight-line {2} {1}'
+# =================== Funções ===================
+ytm() { yt-dlp -x --audio-format mp3 --audio-quality 0 --embed-thumbnail --add-metadata -o "%(title)s.%(ext)s" "$@"; }
+ytv() { yt-dlp -f "bv*+ba/b" -S "res,ext:mp4:m4a" --merge-output-format mp4 -o "%(title)s.%(ext)s" "$@"; }
+mkd() { mkdir -p "$1" && cd "$1"; }
+bak() { cp "$1" "$1.bak"; }
+
+ftext() { 
+    rg --line-number --column --no-heading --color=always --smart-case "$1" | \
+    fzf --ansi --preview 'preview={}; file=$(echo $preview | cut -d: -f1); line=$(echo $preview | cut -d: -f2); bat --style=numbers --color=always --highlight-line $line $file'
+}
+fo() { 
+    local file
+    file=$(fzf --preview 'bat --style=numbers --color=always --line-range :500 {}')
+    [ -n "$file" ] && ${EDITOR:-nano} "$file"
+}
+fkill() { 
+    local pid
+    pid=$(ps -ef | sed 1d | fzf -m | awk '{print $2}')
+    [ -n "$pid" ] && echo "$pid" | xargs kill -"${1:-9}"
 }
 
-# Inicializações Finais
+ex() { 
+    if [ -f "$1" ]; then 
+        case "$1" in 
+            *.tar.bz2) tar xjf "$1" ;; 
+            *.tar.gz) tar xzf "$1" ;; 
+            *.bz2) bunzip2 "$1" ;; 
+            *.rar) unrar x "$1" ;; 
+            *.gz) gunzip "$1" ;; 
+            *.tar) tar xf "$1" ;; 
+            *.tbz2) tar xjf "$1" ;; 
+            *.tgz) tar xzf "$1" ;; 
+            *.zip) unzip "$1" ;; 
+            *.Z) uncompress "$1" ;; 
+            *.7z) 7z x "$1" ;; 
+            *) echo "'$1' não pode ser extraído via ex()" ;; 
+        esac
+    else 
+        echo "'$1' não é um arquivo válido"
+    fi
+}
+
+# =================== Inits Extras ===================
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 EOF
 
-  # Move para o diretório do usuário alvo e ajusta posse.
-  mv /tmp/.zshrc_temp "$TARGET_HOME/.zshrc"
   chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.zshrc"
-
-  # Notificação de conclusão.
-  ui_style \
-    --foreground 82 --border-foreground 82 --border rounded \
-    --margin "1 0" --padding "0 1" \
-    "🎉 ZSHRC Gerado com Sucesso" \
-    "Aliases da distro, Zoxide, Eza e plugins injetados no perfil de $TARGET_USER!"
+  log_success ".zshrc configurado!"
 }
