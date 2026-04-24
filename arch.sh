@@ -128,30 +128,29 @@ require_arch_tools() {
 require_arch_tools
 
 # ==========================================
-# CORREÇÃO 1: KEYMAP
-# Adicionado '|| true' para evitar quebra com set -e caso usuário aperte Esc
-# Adicionado fallback para us.
+# SELEÇÃO DE KEYMAP CORRIGIDA
 # ==========================================
+keymap_choice=""
 ui_style --foreground "$ACCENT_COLOR" "Selecione o layout de teclado (keymap):"
 if have gum; then
-  keymap_choice="$(gum choose "br-abnt2" "br-latin1" "us" "us-intl" "de" "fr" "Outro..." || true)"
+  keymap_choice="$(gum choose "br-abnt2" "br-latin1" "us" "us-intl" "de" "fr" "Outro..." || echo "")"
 else
   read -r -p "Keymap (br-abnt2/us/...): " keymap_choice
 fi
 
-# Fallback se o usuário cancelar o menu
-[[ -z "$keymap_choice" ]] && keymap_choice="us"
-
-KEYMAP="$keymap_choice"
-if [[ "$keymap_choice" == "Outro..." ]]; then
+if [[ -z "$keymap_choice" ]]; then
+  KEYMAP="us"
+elif [[ "$keymap_choice" == "Outro..." ]]; then
   if have gum; then
-    KEYMAP="$(gum input --placeholder "Ex: br-abnt2, us, us-intl" || true)"
+    KEYMAP="$(gum input --placeholder "Ex: br-abnt2, us, us-intl" || echo "")"
   else
     read -r -p "Keymap: " KEYMAP
   fi
+else
+  KEYMAP="$keymap_choice"
 fi
 
-# Fallback final de segurança
+# Fallback final se o usuário deixou em branco
 [[ -z "$KEYMAP" ]] && KEYMAP="us"
 
 if have loadkeys; then
@@ -159,33 +158,31 @@ if have loadkeys; then
 fi
 
 # ==========================================
-# CORREÇÃO 2: SELEÇÃO DE DISCO
-# Filtro awk melhorado e remoção automática de /dev/
+# SELEÇÃO DE DISCO CORRIGIDA (Suporte a VMs)
 # ==========================================
 choose_disk() {
   ui_style --foreground "$ACCENT_COLOR" "Selecione o disco para instalação:"
-  local disks
   
-  # awk: Garante que seja "disk" e ignora dispositivos de loopback (comuns em ISOs)
-  disks="$(lsblk -d -n -o NAME,SIZE,MODEL,TYPE | awk '$4=="disk" && $1 !~ /^loop/ {print $1" "$2" "$3}')"
+  # -e 7,11 ignora loop devices (ISO) e leitores de CD/DVD nativamente
+  # Removemos a coluna MODEL para evitar desalinhamento de colunas no awk em VMs
+  local disks
+  disks="$(lsblk -d -n -e 7,11 -o NAME,SIZE,TYPE | awk '{print $1" "$2" "$3}')"
+  
   [[ -n "$disks" ]] || die "Nenhum disco detectado via lsblk."
   
   local selected
   if have gum; then
-    selected="$(printf '%s\n' "$disks" | gum choose || true)"
+    selected="$(printf '%s\n' "$disks" | gum choose || echo "")"
     [[ -n "$selected" ]] || die "Nenhum disco selecionado (cancelado)."
   else
     printf '%s\n' "$disks"
-    read -r -p "Disco (ex: sda, nvme0n1): " selected
+    read -r -p "Disco (ex: vda, sda, nvme0n1): " selected
     [[ -n "$selected" ]] || die "Nenhum disco selecionado."
   fi
   
   local d
-  # Extrai apenas o primeiro item (ex: nvme0n1)
   d="$(awk '{print $1}' <<<"$selected")"
-  
-  # Prevenção: caso o usuário digite o caminho completo (/dev/sda) sem gum
-  d="${d#/dev/}"
+  d="${d#/dev/}" # Previne erro se o usuário digitar /dev/sda manualmente
   
   [[ -b "/dev/$d" ]] || die "Disco inválido: /dev/$d"
   echo "$d"
@@ -196,11 +193,11 @@ disco="$(choose_disk)"
 # Coleta de parâmetros de particionamento
 ui_style --foreground "$ACCENT_COLOR" "Quantas partições deseja criar?"
 if have gum; then
-  num_parts="$(gum input --placeholder "Ex: 2, 3, 4..." || true)"
+  num_parts="$(gum input --placeholder "Ex: 2, 3, 4..." || echo "")"
 else
   read -r -p "Número de partições: " num_parts
 fi
-[[ "$num_parts" =~ ^[0-9]+$ ]] || die "Número de partições inválido: $num_parts"
+[[ "$num_parts" =~ ^[0-9]+$ ]] || die "Número de partições inválido."
 (( num_parts >= 1 && num_parts <= 16 )) || die "Número de partições fora do limite (1..16)."
 
 tamanhos=()
@@ -214,7 +211,7 @@ for ((i = 1; i <= num_parts; i++)); do
 
   ui_style --foreground "$ACCENT_COLOR" "Tamanho da partição (deixe em branco para usar o resto):"
   if have gum; then
-    tam="$(gum input --placeholder "Ex: +512M, +20G" || true)"
+    tam="$(gum input --placeholder "Ex: +512M, +20G" || echo "")"
   else
     read -r -p "Tamanho (ex: +512M, +20G ou vazio): " tam
   fi
@@ -225,12 +222,12 @@ for ((i = 1; i <= num_parts; i++)); do
 
   ui_style --foreground "$ACCENT_COLOR" "Tipo da Partição:"
   if have gum; then
-    t_input="$(gum choose "EFI" "Swap" "Linux" || true)"
+    t_input="$(gum choose "EFI" "Swap" "Linux" || echo "")"
   else
     read -r -p "Tipo (EFI/Swap/Linux): " t_input
   fi
   
-  [[ -z "$t_input" ]] && t_input="Linux" # Fallback
+  [[ -z "$t_input" ]] && t_input="Linux" # Fallback se cancelar
 
   case $t_input in
   "EFI") tipos_fdisk+=("1") ;;
@@ -240,7 +237,7 @@ for ((i = 1; i <= num_parts; i++)); do
 
   ui_style --foreground "$ACCENT_COLOR" "Sistema de Arquivos:"
   if have gum; then
-    fs_input="$(gum choose "FAT32" "SWAP" "Ext4" "Btrfs" || true)"
+    fs_input="$(gum choose "FAT32" "SWAP" "Ext4" "Btrfs" || echo "")"
   else
     read -r -p "FS (FAT32/SWAP/Ext4/Btrfs): " fs_input
   fi
@@ -261,7 +258,7 @@ for ((i = 1; i <= num_parts; i++)); do
   else
     ui_style --foreground "$ACCENT_COLOR" "Ponto de montagem (ex: /, /boot, /home):"
     if have gum; then
-      p_mont="$(gum input --placeholder "Ponto de montagem" || true)"
+      p_mont="$(gum input --placeholder "Ponto de montagem" || echo "")"
     else
       read -r -p "Ponto de montagem: " p_mont
     fi
@@ -276,7 +273,7 @@ ui_title "Configurações do Sistema"
 
 ui_style --foreground "$ACCENT_COLOR" "Qual a marca da sua CPU?"
 if have gum; then
-  marca_input="$(gum choose "Intel" "AMD" "Nenhuma/VM" || true)"
+  marca_input="$(gum choose "Intel" "AMD" "Nenhuma/VM" || echo "")"
 else
   read -r -p "CPU (Intel/AMD/Nenhuma): " marca_input
 fi
@@ -288,7 +285,7 @@ esac
 
 ui_style --foreground "$ACCENT_COLOR" "Qual kernel deseja instalar?"
 if have gum; then
-  kernel_choice="$(gum choose "linux (padrão)" "linux-lts" "linux-zen" || true)"
+  kernel_choice="$(gum choose "linux (padrão)" "linux-lts" "linux-zen" || echo "")"
 else
   read -r -p "Kernel (linux/linux-lts/linux-zen): " kernel_choice
 fi
@@ -307,15 +304,15 @@ esac
 
 ui_style --foreground "$ACCENT_COLOR" "Qual deseja que seja seu hostname?"
 if have gum; then
-  hostname="$(gum input --placeholder "Ex: arch-pc" || true)"
+  hostname="$(gum input --placeholder "Ex: arch-pc" || echo "")"
 else
   read -r -p "Hostname: " hostname
 fi
-[[ "$hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]] || die "Hostname inválido: $hostname"
+[[ "$hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]] || die "Hostname inválido."
 
 ui_style --foreground "$ACCENT_COLOR" "Defina a senha do ROOT:"
 if have gum; then
-  senha_root="$(gum input --password --placeholder "Senha Root" || true)"
+  senha_root="$(gum input --password --placeholder "Senha Root" || echo "")"
 else
   read -r -s -p "Senha root: " senha_root; echo
 fi
@@ -323,15 +320,15 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "Forneça o nome para o seu usuário comum:"
 if have gum; then
-  usuario="$(gum input --placeholder "Nome de Usuário" || true)"
+  usuario="$(gum input --placeholder "Nome de Usuário" || echo "")"
 else
   read -r -p "Usuário: " usuario
 fi
-[[ "$usuario" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "Nome de usuário inválido: $usuario"
+[[ "$usuario" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "Nome de usuário inválido."
 
 ui_style --foreground "$ACCENT_COLOR" "Forneça a senha para o usuário $usuario:"
 if have gum; then
-  senha_usuario="$(gum input --password --placeholder "Senha do Usuário" || true)"
+  senha_usuario="$(gum input --password --placeholder "Senha do Usuário" || echo "")"
 else
   read -r -s -p "Senha do usuário: " senha_usuario; echo
 fi
@@ -339,14 +336,14 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "Qual desktop deseja instalar?"
 if have gum; then
-  desktop_choice="$(gum choose "GNOME" "KDE Plasma" "XFCE" "i3" "Nenhum (somente CLI)" || true)"
+  desktop_choice="$(gum choose "GNOME" "KDE Plasma" "XFCE" "i3" "Nenhum (somente CLI)" || echo "")"
 else
   read -r -p "Desktop (GNOME/KDE/XFCE/i3/Nenhum): " desktop_choice
 fi
 
 ui_style --foreground "$ACCENT_COLOR" "Qual bootloader deseja instalar?"
 if have gum; then
-  bootloader_choice="$(gum choose "GRUB" "systemd-boot" "Limine" || true)"
+  bootloader_choice="$(gum choose "GRUB" "systemd-boot" "Limine" || echo "")"
 else
   read -r -p "Bootloader (GRUB/systemd-boot/Limine): " bootloader_choice
 fi
@@ -355,7 +352,7 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "Quais drivers deseja instalar?"
 if have gum; then
-  driver_choice="$(gum choose "Intel/AMD (Mesa)" "NVIDIA (proprietário)" "NVIDIA (open kernel module)" "VM/VirtualBox" "Nenhum" || true)"
+  driver_choice="$(gum choose "Intel/AMD (Mesa)" "NVIDIA (proprietário)" "NVIDIA (open kernel module)" "VM/VirtualBox" "Nenhum" || echo "")"
 else
   read -r -p "Drivers (Mesa/NVIDIA/NVIDIA-open/VM/Nenhum): " driver_choice
 fi
@@ -375,7 +372,7 @@ case "$bootloader_choice" in
   "GRUB") BOOTLOADER_KIND="grub"; BOOTLOADER_PKGS="grub efibootmgr" ;;
   "systemd-boot") BOOTLOADER_KIND="systemd-boot"; BOOTLOADER_PKGS="efibootmgr" ;;
   "Limine") BOOTLOADER_KIND="limine"; BOOTLOADER_PKGS="limine efibootmgr" ;;
-  *) die "Bootloader inválido: $bootloader_choice" ;;
+  *) die "Bootloader inválido." ;;
 esac
 
 DESKTOP_PKGS=""
@@ -404,7 +401,7 @@ validate_layout() {
   done
   (( has_root == 1 )) || die "Você precisa definir uma partição com ponto de montagem '/'."
   (( has_efi == 1 )) || die "Você precisa de uma partição EFI (tipo EFI + FAT32)."
-  (( has_boot == 1 )) || die "Para boot UEFI, monte a partição EFI em '/boot' (ponto /boot)."
+  (( has_boot == 1 )) || die "Para boot UEFI, monte a partição EFI em '/boot'."
 }
 
 validate_layout
@@ -445,7 +442,6 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "[2/5] Formatando e Montando em /mnt..."
 
-# A Lógica aqui é segura pois suporta sda1 ou nvme0n1p1 corretamente.
 get_part_path() {
   local n=$1
   if [[ "$disco" =~ [0-9]$ ]]; then
@@ -540,7 +536,7 @@ if [[ ! -d /mnt/boot ]]; then
 fi
 
 if ! mountpoint -q /mnt/boot; then
-  die "A partição EFI precisa estar montada em /boot (ponto /boot). Selecione /boot para a partição EFI."
+  die "A partição EFI precisa estar montada em /boot (ponto /boot)."
 fi
 
 ui_style --foreground "$ACCENT_COLOR" "[3/5] Iniciando o pacstrap. Isso pode demorar um pouco..."
