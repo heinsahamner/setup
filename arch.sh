@@ -84,7 +84,7 @@ ui_title() {
 ui_confirm() {
   local prompt="$1"
   if have gum; then 
-    gum confirm "$prompt"
+    gum confirm "$prompt" || return 1
   else 
     read -r -p "$prompt [y/N] " ans && [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]]
   fi
@@ -128,14 +128,14 @@ require_arch_tools() {
 require_arch_tools
 
 # ==========================================
-# SELEÇÃO DE KEYMAP CORRIGIDA
+# KEYMAP (Corrigido o crash do set -e)
 # ==========================================
 keymap_choice=""
 ui_style --foreground "$ACCENT_COLOR" "Selecione o layout de teclado (keymap):"
 if have gum; then
   keymap_choice="$(gum choose "br-abnt2" "br-latin1" "us" "us-intl" "de" "fr" "Outro..." || echo "")"
 else
-  read -r -p "Keymap (br-abnt2/us/...): " keymap_choice
+  read -r -p "Keymap (br-abnt2/us/...): " keymap_choice || true
 fi
 
 if [[ -z "$keymap_choice" ]]; then
@@ -144,47 +144,51 @@ elif [[ "$keymap_choice" == "Outro..." ]]; then
   if have gum; then
     KEYMAP="$(gum input --placeholder "Ex: br-abnt2, us, us-intl" || echo "")"
   else
-    read -r -p "Keymap: " KEYMAP
+    read -r -p "Keymap: " KEYMAP || true
   fi
 else
   KEYMAP="$keymap_choice"
 fi
 
-# Fallback final se o usuário deixou em branco
-[[ -z "$KEYMAP" ]] && KEYMAP="us"
+if [[ -z "$KEYMAP" ]]; then
+  KEYMAP="us"
+fi
 
 if have loadkeys; then
   loadkeys "$KEYMAP" >/dev/null 2>&1 || ui_style --foreground 214 "⚠️  Keymap '$KEYMAP' não aplicado no live (talvez não exista)."
 fi
 
 # ==========================================
-# SELEÇÃO DE DISCO CORRIGIDA (Suporte a VMs)
+# SELEÇÃO DE DISCO (Suporte robusto a VMs)
 # ==========================================
 choose_disk() {
   ui_style --foreground "$ACCENT_COLOR" "Selecione o disco para instalação:"
   
-  # -e 7,11 ignora loop devices (ISO) e leitores de CD/DVD nativamente
-  # Removemos a coluna MODEL para evitar desalinhamento de colunas no awk em VMs
+  # Filtra puramente pela string "disk" e exclui qualquer coisa que comece com "loop"
   local disks
-  disks="$(lsblk -d -n -e 7,11 -o NAME,SIZE,TYPE | awk '{print $1" "$2" "$3}')"
+  disks="$(lsblk -d -n -o NAME,SIZE,TYPE | awk '$3=="disk" && $1!~/^loop/ {print $1" "$2}')"
   
-  [[ -n "$disks" ]] || die "Nenhum disco detectado via lsblk."
+  if [[ -z "$disks" ]]; then
+    die "Nenhum disco detectado via lsblk."
+  fi
   
   local selected
   if have gum; then
     selected="$(printf '%s\n' "$disks" | gum choose || echo "")"
-    [[ -n "$selected" ]] || die "Nenhum disco selecionado (cancelado)."
+    if [[ -z "$selected" ]]; then die "Nenhum disco selecionado (cancelado)."; fi
   else
     printf '%s\n' "$disks"
     read -r -p "Disco (ex: vda, sda, nvme0n1): " selected
-    [[ -n "$selected" ]] || die "Nenhum disco selecionado."
+    if [[ -z "$selected" ]]; then die "Nenhum disco selecionado."; fi
   fi
   
   local d
   d="$(awk '{print $1}' <<<"$selected")"
-  d="${d#/dev/}" # Previne erro se o usuário digitar /dev/sda manualmente
+  d="${d#/dev/}" 
   
-  [[ -b "/dev/$d" ]] || die "Disco inválido: /dev/$d"
+  if [[ ! -b "/dev/$d" ]]; then
+    die "Disco inválido: /dev/$d"
+  fi
   echo "$d"
 }
 
@@ -195,10 +199,16 @@ ui_style --foreground "$ACCENT_COLOR" "Quantas partições deseja criar?"
 if have gum; then
   num_parts="$(gum input --placeholder "Ex: 2, 3, 4..." || echo "")"
 else
-  read -r -p "Número de partições: " num_parts
+  read -r -p "Número de partições: " num_parts || true
 fi
-[[ "$num_parts" =~ ^[0-9]+$ ]] || die "Número de partições inválido."
-(( num_parts >= 1 && num_parts <= 16 )) || die "Número de partições fora do limite (1..16)."
+
+if [[ ! "$num_parts" =~ ^[0-9]+$ ]]; then
+  die "Número de partições inválido."
+fi
+
+if (( num_parts < 1 || num_parts > 16 )); then
+  die "Número de partições fora do limite (1..16)."
+fi
 
 tamanhos=()
 tipos_fdisk=()
@@ -213,7 +223,7 @@ for ((i = 1; i <= num_parts; i++)); do
   if have gum; then
     tam="$(gum input --placeholder "Ex: +512M, +20G" || echo "")"
   else
-    read -r -p "Tamanho (ex: +512M, +20G ou vazio): " tam
+    read -r -p "Tamanho (ex: +512M, +20G ou vazio): " tam || true
   fi
   if [[ -n "$tam" && ! "$tam" =~ ^\+?[0-9]+[KMGTP]?$ ]]; then
     die "Tamanho inválido: $tam"
@@ -224,10 +234,12 @@ for ((i = 1; i <= num_parts; i++)); do
   if have gum; then
     t_input="$(gum choose "EFI" "Swap" "Linux" || echo "")"
   else
-    read -r -p "Tipo (EFI/Swap/Linux): " t_input
+    read -r -p "Tipo (EFI/Swap/Linux): " t_input || true
   fi
   
-  [[ -z "$t_input" ]] && t_input="Linux" # Fallback se cancelar
+  if [[ -z "$t_input" ]]; then
+    t_input="Linux"
+  fi
 
   case $t_input in
   "EFI") tipos_fdisk+=("1") ;;
@@ -239,10 +251,12 @@ for ((i = 1; i <= num_parts; i++)); do
   if have gum; then
     fs_input="$(gum choose "FAT32" "SWAP" "Ext4" "Btrfs" || echo "")"
   else
-    read -r -p "FS (FAT32/SWAP/Ext4/Btrfs): " fs_input
+    read -r -p "FS (FAT32/SWAP/Ext4/Btrfs): " fs_input || true
   fi
 
-  [[ -z "$fs_input" ]] && fs_input="Ext4" # Fallback
+  if [[ -z "$fs_input" ]]; then
+    fs_input="Ext4"
+  fi
 
   case $fs_input in
   "FAT32") fs_code="1" ;;
@@ -260,10 +274,14 @@ for ((i = 1; i <= num_parts; i++)); do
     if have gum; then
       p_mont="$(gum input --placeholder "Ponto de montagem" || echo "")"
     else
-      read -r -p "Ponto de montagem: " p_mont
+      read -r -p "Ponto de montagem: " p_mont || true
     fi
-    [[ -n "$p_mont" ]] || die "Ponto de montagem cancelado."
-    [[ "$p_mont" == /* ]] || die "Ponto de montagem deve começar com '/': $p_mont"
+    if [[ -z "$p_mont" ]]; then
+      die "Ponto de montagem não fornecido."
+    fi
+    if [[ "$p_mont" != /* ]]; then
+      die "Ponto de montagem deve começar com '/': $p_mont"
+    fi
     pontos_montagem+=("$p_mont")
   fi
 done
@@ -275,7 +293,7 @@ ui_style --foreground "$ACCENT_COLOR" "Qual a marca da sua CPU?"
 if have gum; then
   marca_input="$(gum choose "Intel" "AMD" "Nenhuma/VM" || echo "")"
 else
-  read -r -p "CPU (Intel/AMD/Nenhuma): " marca_input
+  read -r -p "CPU (Intel/AMD/Nenhuma): " marca_input || true
 fi
 case "$marca_input" in
 "Intel") ucode="intel-ucode" ;;
@@ -287,10 +305,12 @@ ui_style --foreground "$ACCENT_COLOR" "Qual kernel deseja instalar?"
 if have gum; then
   kernel_choice="$(gum choose "linux (padrão)" "linux-lts" "linux-zen" || echo "")"
 else
-  read -r -p "Kernel (linux/linux-lts/linux-zen): " kernel_choice
+  read -r -p "Kernel (linux/linux-lts/linux-zen): " kernel_choice || true
 fi
 
-[[ -z "$kernel_choice" ]] && kernel_choice="linux (padrão)"
+if [[ -z "$kernel_choice" ]]; then
+  kernel_choice="linux (padrão)"
+fi
 
 case "$kernel_choice" in
   "linux (padrão)")
@@ -306,9 +326,11 @@ ui_style --foreground "$ACCENT_COLOR" "Qual deseja que seja seu hostname?"
 if have gum; then
   hostname="$(gum input --placeholder "Ex: arch-pc" || echo "")"
 else
-  read -r -p "Hostname: " hostname
+  read -r -p "Hostname: " hostname || true
 fi
-[[ "$hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]] || die "Hostname inválido."
+if [[ ! "$hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]]; then
+  die "Hostname inválido."
+fi
 
 ui_style --foreground "$ACCENT_COLOR" "Defina a senha do ROOT:"
 if have gum; then
@@ -316,15 +338,19 @@ if have gum; then
 else
   read -r -s -p "Senha root: " senha_root; echo
 fi
-[[ -n "$senha_root" ]] || die "Senha root não pode ser vazia."
+if [[ -z "$senha_root" ]]; then
+  die "Senha root não pode ser vazia."
+fi
 
 ui_style --foreground "$ACCENT_COLOR" "Forneça o nome para o seu usuário comum:"
 if have gum; then
   usuario="$(gum input --placeholder "Nome de Usuário" || echo "")"
 else
-  read -r -p "Usuário: " usuario
+  read -r -p "Usuário: " usuario || true
 fi
-[[ "$usuario" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "Nome de usuário inválido."
+if [[ ! "$usuario" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+  die "Nome de usuário inválido."
+fi
 
 ui_style --foreground "$ACCENT_COLOR" "Forneça a senha para o usuário $usuario:"
 if have gum; then
@@ -332,29 +358,33 @@ if have gum; then
 else
   read -r -s -p "Senha do usuário: " senha_usuario; echo
 fi
-[[ -n "$senha_usuario" ]] || die "Senha do usuário não pode ser vazia."
+if [[ -z "$senha_usuario" ]]; then
+  die "Senha do usuário não pode ser vazia."
+fi
 
 ui_style --foreground "$ACCENT_COLOR" "Qual desktop deseja instalar?"
 if have gum; then
   desktop_choice="$(gum choose "GNOME" "KDE Plasma" "XFCE" "i3" "Nenhum (somente CLI)" || echo "")"
 else
-  read -r -p "Desktop (GNOME/KDE/XFCE/i3/Nenhum): " desktop_choice
+  read -r -p "Desktop (GNOME/KDE/XFCE/i3/Nenhum): " desktop_choice || true
 fi
 
 ui_style --foreground "$ACCENT_COLOR" "Qual bootloader deseja instalar?"
 if have gum; then
   bootloader_choice="$(gum choose "GRUB" "systemd-boot" "Limine" || echo "")"
 else
-  read -r -p "Bootloader (GRUB/systemd-boot/Limine): " bootloader_choice
+  read -r -p "Bootloader (GRUB/systemd-boot/Limine): " bootloader_choice || true
 fi
 
-[[ -z "$bootloader_choice" ]] && bootloader_choice="systemd-boot"
+if [[ -z "$bootloader_choice" ]]; then
+  bootloader_choice="systemd-boot"
+fi
 
 ui_style --foreground "$ACCENT_COLOR" "Quais drivers deseja instalar?"
 if have gum; then
   driver_choice="$(gum choose "Intel/AMD (Mesa)" "NVIDIA (proprietário)" "NVIDIA (open kernel module)" "VM/VirtualBox" "Nenhum" || echo "")"
 else
-  read -r -p "Drivers (Mesa/NVIDIA/NVIDIA-open/VM/Nenhum): " driver_choice
+  read -r -p "Drivers (Mesa/NVIDIA/NVIDIA-open/VM/Nenhum): " driver_choice || true
 fi
 
 DRIVER_PKGS=""
@@ -635,11 +665,11 @@ LOADER
     echo -e "\e[35m-> Instalando o Limine (UEFI)...\e[0m"
     mkdir -p /boot/EFI/BOOT
     LIMINE_EFI=""
-    for p in \
-      /usr/share/limine/BOOTX64.EFI \
-      /usr/share/limine/limine-uefi/BOOTX64.EFI \
-      /usr/lib/limine/BOOTX64.EFI; do
-      [[ -f "\$p" ]] && LIMINE_EFI="\$p" && break
+    for p in /usr/share/limine/BOOTX64.EFI /usr/share/limine/limine-uefi/BOOTX64.EFI /usr/lib/limine/BOOTX64.EFI; do
+      if [[ -f "\$p" ]]; then
+        LIMINE_EFI="\$p"
+        break
+      fi
     done
     if [[ -z "\$LIMINE_EFI" ]]; then
       echo "Não encontrei o BOOTX64.EFI do Limine no sistema." >&2
