@@ -47,8 +47,6 @@ cleanup_mounts() {
 trap cleanup_mounts EXIT
 
 wait_for_network() {
-  # Verifica conectividade de rede (DNS + HTTPS) com tentativas.
-  # usage: wait_for_network [retries] [sleep_seconds]
   local retries="${1:-15}"
   local delay="${2:-2}"
 
@@ -85,13 +83,14 @@ ui_title() {
 }
 ui_confirm() {
   local prompt="$1"
-  if have gum; then gum confirm "$prompt"; else read -r -p "$prompt [y/N] " ans && [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]]; fi
+  if have gum; then 
+    gum confirm "$prompt"
+  else 
+    read -r -p "$prompt [y/N] " ans && [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]]
+  fi
 }
 
-# Variáveis de cor para o gum
 ACCENT_COLOR="212"
-GUM_STYLE="gum style --foreground $ACCENT_COLOR"
-GUM_TITLE="gum style --border double --margin 1 --padding 1 2 --border-foreground $ACCENT_COLOR"
 
 usage() {
   cat <<EOF
@@ -116,28 +115,7 @@ ensure_gum
 ui_title "Archinst, por heinsahamner"
 sleep 1
 
-# Verificação de privilégios
 need_root
-
-ui_style --foreground "$ACCENT_COLOR" "Selecione o layout de teclado (keymap):"
-if have gum; then
-  keymap_choice="$(gum choose "br-abnt2" "br-latin1" "us" "us-intl" "de" "fr" "Outro...")"
-else
-  read -r -p "Keymap (br-abnt2/us/...): " keymap_choice
-fi
-
-KEYMAP="$keymap_choice"
-if [[ "$keymap_choice" == "Outro..." ]]; then
-  if have gum; then
-    KEYMAP="$(gum input --placeholder "Ex: br-abnt2, us, us-intl")"
-  else
-    read -r -p "Keymap: " KEYMAP
-  fi
-fi
-
-if have loadkeys && [[ -n "$KEYMAP" ]]; then
-  loadkeys "$KEYMAP" >/dev/null 2>&1 || ui_style --foreground 214 "⚠️  Keymap '$KEYMAP' não aplicado no live (talvez não exista)."
-fi
 
 require_arch_tools() {
   local missing=()
@@ -149,20 +127,66 @@ require_arch_tools() {
 
 require_arch_tools
 
+# ==========================================
+# CORREÇÃO 1: KEYMAP
+# Adicionado '|| true' para evitar quebra com set -e caso usuário aperte Esc
+# Adicionado fallback para us.
+# ==========================================
+ui_style --foreground "$ACCENT_COLOR" "Selecione o layout de teclado (keymap):"
+if have gum; then
+  keymap_choice="$(gum choose "br-abnt2" "br-latin1" "us" "us-intl" "de" "fr" "Outro..." || true)"
+else
+  read -r -p "Keymap (br-abnt2/us/...): " keymap_choice
+fi
+
+# Fallback se o usuário cancelar o menu
+[[ -z "$keymap_choice" ]] && keymap_choice="us"
+
+KEYMAP="$keymap_choice"
+if [[ "$keymap_choice" == "Outro..." ]]; then
+  if have gum; then
+    KEYMAP="$(gum input --placeholder "Ex: br-abnt2, us, us-intl" || true)"
+  else
+    read -r -p "Keymap: " KEYMAP
+  fi
+fi
+
+# Fallback final de segurança
+[[ -z "$KEYMAP" ]] && KEYMAP="us"
+
+if have loadkeys; then
+  loadkeys "$KEYMAP" >/dev/null 2>&1 || ui_style --foreground 214 "⚠️  Keymap '$KEYMAP' não aplicado no live (talvez não exista)."
+fi
+
+# ==========================================
+# CORREÇÃO 2: SELEÇÃO DE DISCO
+# Filtro awk melhorado e remoção automática de /dev/
+# ==========================================
 choose_disk() {
   ui_style --foreground "$ACCENT_COLOR" "Selecione o disco para instalação:"
   local disks
-  disks="$(lsblk -d -n -o NAME,SIZE,MODEL,TYPE | awk '$4=="disk"{print $1" "$2" "$3}')"
+  
+  # awk: Garante que seja "disk" e ignora dispositivos de loopback (comuns em ISOs)
+  disks="$(lsblk -d -n -o NAME,SIZE,MODEL,TYPE | awk '$4=="disk" && $1 !~ /^loop/ {print $1" "$2" "$3}')"
   [[ -n "$disks" ]] || die "Nenhum disco detectado via lsblk."
+  
   local selected
   if have gum; then
-    selected="$(printf '%s\n' "$disks" | gum choose)"
+    selected="$(printf '%s\n' "$disks" | gum choose || true)"
+    [[ -n "$selected" ]] || die "Nenhum disco selecionado (cancelado)."
   else
     printf '%s\n' "$disks"
     read -r -p "Disco (ex: sda, nvme0n1): " selected
+    [[ -n "$selected" ]] || die "Nenhum disco selecionado."
   fi
+  
   local d
+  # Extrai apenas o primeiro item (ex: nvme0n1)
   d="$(awk '{print $1}' <<<"$selected")"
+  
+  # Prevenção: caso o usuário digite o caminho completo (/dev/sda) sem gum
+  d="${d#/dev/}"
+  
   [[ -b "/dev/$d" ]] || die "Disco inválido: /dev/$d"
   echo "$d"
 }
@@ -172,7 +196,7 @@ disco="$(choose_disk)"
 # Coleta de parâmetros de particionamento
 ui_style --foreground "$ACCENT_COLOR" "Quantas partições deseja criar?"
 if have gum; then
-  num_parts="$(gum input --placeholder "Ex: 2, 3, 4...")"
+  num_parts="$(gum input --placeholder "Ex: 2, 3, 4..." || true)"
 else
   read -r -p "Número de partições: " num_parts
 fi
@@ -190,7 +214,7 @@ for ((i = 1; i <= num_parts; i++)); do
 
   ui_style --foreground "$ACCENT_COLOR" "Tamanho da partição (deixe em branco para usar o resto):"
   if have gum; then
-    tam="$(gum input --placeholder "Ex: +512M, +20G")"
+    tam="$(gum input --placeholder "Ex: +512M, +20G" || true)"
   else
     read -r -p "Tamanho (ex: +512M, +20G ou vazio): " tam
   fi
@@ -201,10 +225,13 @@ for ((i = 1; i <= num_parts; i++)); do
 
   ui_style --foreground "$ACCENT_COLOR" "Tipo da Partição:"
   if have gum; then
-    t_input="$(gum choose "EFI" "Swap" "Linux")"
+    t_input="$(gum choose "EFI" "Swap" "Linux" || true)"
   else
     read -r -p "Tipo (EFI/Swap/Linux): " t_input
   fi
+  
+  [[ -z "$t_input" ]] && t_input="Linux" # Fallback
+
   case $t_input in
   "EFI") tipos_fdisk+=("1") ;;
   "Swap") tipos_fdisk+=("19") ;;
@@ -213,12 +240,13 @@ for ((i = 1; i <= num_parts; i++)); do
 
   ui_style --foreground "$ACCENT_COLOR" "Sistema de Arquivos:"
   if have gum; then
-    fs_input="$(gum choose "FAT32" "SWAP" "Ext4" "Btrfs")"
+    fs_input="$(gum choose "FAT32" "SWAP" "Ext4" "Btrfs" || true)"
   else
     read -r -p "FS (FAT32/SWAP/Ext4/Btrfs): " fs_input
   fi
 
-  # Mapeia para o formato original do seu script
+  [[ -z "$fs_input" ]] && fs_input="Ext4" # Fallback
+
   case $fs_input in
   "FAT32") fs_code="1" ;;
   "SWAP") fs_code="2" ;;
@@ -233,10 +261,11 @@ for ((i = 1; i <= num_parts; i++)); do
   else
     ui_style --foreground "$ACCENT_COLOR" "Ponto de montagem (ex: /, /boot, /home):"
     if have gum; then
-      p_mont="$(gum input --placeholder "Ponto de montagem")"
+      p_mont="$(gum input --placeholder "Ponto de montagem" || true)"
     else
       read -r -p "Ponto de montagem: " p_mont
     fi
+    [[ -n "$p_mont" ]] || die "Ponto de montagem cancelado."
     [[ "$p_mont" == /* ]] || die "Ponto de montagem deve começar com '/': $p_mont"
     pontos_montagem+=("$p_mont")
   fi
@@ -247,7 +276,7 @@ ui_title "Configurações do Sistema"
 
 ui_style --foreground "$ACCENT_COLOR" "Qual a marca da sua CPU?"
 if have gum; then
-  marca_input="$(gum choose "Intel" "AMD" "Nenhuma/VM")"
+  marca_input="$(gum choose "Intel" "AMD" "Nenhuma/VM" || true)"
 else
   read -r -p "CPU (Intel/AMD/Nenhuma): " marca_input
 fi
@@ -259,38 +288,26 @@ esac
 
 ui_style --foreground "$ACCENT_COLOR" "Qual kernel deseja instalar?"
 if have gum; then
-  kernel_choice="$(gum choose "linux (padrão)" "linux-lts" "linux-zen")"
+  kernel_choice="$(gum choose "linux (padrão)" "linux-lts" "linux-zen" || true)"
 else
   read -r -p "Kernel (linux/linux-lts/linux-zen): " kernel_choice
 fi
 
-KERNEL_PKG="linux"
-KERNEL_HEADERS_PKG="linux-headers"
-KERNEL_BASENAME="linux"
+[[ -z "$kernel_choice" ]] && kernel_choice="linux (padrão)"
+
 case "$kernel_choice" in
   "linux (padrão)")
-    KERNEL_PKG="linux"
-    KERNEL_HEADERS_PKG="linux-headers"
-    KERNEL_BASENAME="linux"
-    ;;
+    KERNEL_PKG="linux"; KERNEL_HEADERS_PKG="linux-headers"; KERNEL_BASENAME="linux" ;;
   "linux-lts"|"lts"|"LTS")
-    KERNEL_PKG="linux-lts"
-    KERNEL_HEADERS_PKG="linux-lts-headers"
-    KERNEL_BASENAME="linux-lts"
-    ;;
+    KERNEL_PKG="linux-lts"; KERNEL_HEADERS_PKG="linux-lts-headers"; KERNEL_BASENAME="linux-lts" ;;
   "linux-zen"|"zen"|"ZEN")
-    KERNEL_PKG="linux-zen"
-    KERNEL_HEADERS_PKG="linux-zen-headers"
-    KERNEL_BASENAME="linux-zen"
-    ;;
-  *)
-    die "Kernel inválido: $kernel_choice"
-    ;;
+    KERNEL_PKG="linux-zen"; KERNEL_HEADERS_PKG="linux-zen-headers"; KERNEL_BASENAME="linux-zen" ;;
+  *) die "Kernel inválido: $kernel_choice" ;;
 esac
 
 ui_style --foreground "$ACCENT_COLOR" "Qual deseja que seja seu hostname?"
 if have gum; then
-  hostname="$(gum input --placeholder "Ex: arch-pc")"
+  hostname="$(gum input --placeholder "Ex: arch-pc" || true)"
 else
   read -r -p "Hostname: " hostname
 fi
@@ -298,7 +315,7 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "Defina a senha do ROOT:"
 if have gum; then
-  senha_root="$(gum input --password --placeholder "Senha Root")"
+  senha_root="$(gum input --password --placeholder "Senha Root" || true)"
 else
   read -r -s -p "Senha root: " senha_root; echo
 fi
@@ -306,7 +323,7 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "Forneça o nome para o seu usuário comum:"
 if have gum; then
-  usuario="$(gum input --placeholder "Nome de Usuário")"
+  usuario="$(gum input --placeholder "Nome de Usuário" || true)"
 else
   read -r -p "Usuário: " usuario
 fi
@@ -314,7 +331,7 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "Forneça a senha para o usuário $usuario:"
 if have gum; then
-  senha_usuario="$(gum input --password --placeholder "Senha do Usuário")"
+  senha_usuario="$(gum input --password --placeholder "Senha do Usuário" || true)"
 else
   read -r -s -p "Senha do usuário: " senha_usuario; echo
 fi
@@ -322,87 +339,53 @@ fi
 
 ui_style --foreground "$ACCENT_COLOR" "Qual desktop deseja instalar?"
 if have gum; then
-  desktop_choice="$(gum choose "GNOME" "KDE Plasma" "XFCE" "i3" "Nenhum (somente CLI)")"
+  desktop_choice="$(gum choose "GNOME" "KDE Plasma" "XFCE" "i3" "Nenhum (somente CLI)" || true)"
 else
   read -r -p "Desktop (GNOME/KDE/XFCE/i3/Nenhum): " desktop_choice
 fi
 
 ui_style --foreground "$ACCENT_COLOR" "Qual bootloader deseja instalar?"
 if have gum; then
-  bootloader_choice="$(gum choose "GRUB" "systemd-boot" "Limine")"
+  bootloader_choice="$(gum choose "GRUB" "systemd-boot" "Limine" || true)"
 else
   read -r -p "Bootloader (GRUB/systemd-boot/Limine): " bootloader_choice
 fi
 
+[[ -z "$bootloader_choice" ]] && bootloader_choice="systemd-boot"
+
 ui_style --foreground "$ACCENT_COLOR" "Quais drivers deseja instalar?"
 if have gum; then
-  driver_choice="$(gum choose "Intel/AMD (Mesa)" "NVIDIA (proprietário)" "NVIDIA (open kernel module)" "VM/VirtualBox" "Nenhum")"
+  driver_choice="$(gum choose "Intel/AMD (Mesa)" "NVIDIA (proprietário)" "NVIDIA (open kernel module)" "VM/VirtualBox" "Nenhum" || true)"
 else
   read -r -p "Drivers (Mesa/NVIDIA/NVIDIA-open/VM/Nenhum): " driver_choice
 fi
 
 DRIVER_PKGS=""
 case "$driver_choice" in
-  "Intel/AMD (Mesa)"|"Mesa")
-    DRIVER_PKGS="mesa vulkan-radeon vulkan-intel libva-mesa-driver"
-    ;;
-  "NVIDIA (proprietário)"|"NVIDIA")
-    DRIVER_PKGS="nvidia nvidia-utils nvidia-settings"
-    ;;
-  "NVIDIA (open kernel module)"|"NVIDIA-open"|"open")
-    DRIVER_PKGS="nvidia-open nvidia-utils nvidia-settings"
-    ;;
-  "VM/VirtualBox"|"VM")
-    DRIVER_PKGS="virtualbox-guest-utils"
-    ;;
-  *)
-    DRIVER_PKGS=""
-    ;;
+  "Intel/AMD (Mesa)"|"Mesa") DRIVER_PKGS="mesa vulkan-radeon vulkan-intel libva-mesa-driver" ;;
+  "NVIDIA (proprietário)"|"NVIDIA") DRIVER_PKGS="nvidia nvidia-utils nvidia-settings" ;;
+  "NVIDIA (open kernel module)"|"NVIDIA-open"|"open") DRIVER_PKGS="nvidia-open nvidia-utils nvidia-settings" ;;
+  "VM/VirtualBox"|"VM") DRIVER_PKGS="virtualbox-guest-utils" ;;
+  *) DRIVER_PKGS="" ;;
 esac
 
 BOOTLOADER_PKGS=""
 BOOTLOADER_KIND=""
 case "$bootloader_choice" in
-  "GRUB")
-    BOOTLOADER_KIND="grub"
-    BOOTLOADER_PKGS="grub efibootmgr"
-    ;;
-  "systemd-boot")
-    BOOTLOADER_KIND="systemd-boot"
-    BOOTLOADER_PKGS="efibootmgr"
-    ;;
-  "Limine")
-    BOOTLOADER_KIND="limine"
-    BOOTLOADER_PKGS="limine efibootmgr"
-    ;;
-  *)
-    die "Bootloader inválido: $bootloader_choice"
-    ;;
+  "GRUB") BOOTLOADER_KIND="grub"; BOOTLOADER_PKGS="grub efibootmgr" ;;
+  "systemd-boot") BOOTLOADER_KIND="systemd-boot"; BOOTLOADER_PKGS="efibootmgr" ;;
+  "Limine") BOOTLOADER_KIND="limine"; BOOTLOADER_PKGS="limine efibootmgr" ;;
+  *) die "Bootloader inválido: $bootloader_choice" ;;
 esac
 
 DESKTOP_PKGS=""
 DM_SERVICE=""
 case "$desktop_choice" in
-  "GNOME")
-    DESKTOP_PKGS="gnome gnome-extra"
-    DM_SERVICE="gdm.service"
-    ;;
-  "KDE Plasma")
-    DESKTOP_PKGS="plasma kde-applications sddm"
-    DM_SERVICE="sddm.service"
-    ;;
-  "XFCE")
-    DESKTOP_PKGS="xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"
-    DM_SERVICE="lightdm.service"
-    ;;
-  "i3")
-    DESKTOP_PKGS="xorg-server xorg-xinit i3-wm i3status i3lock dmenu alacritty"
-    DM_SERVICE=""
-    ;;
-  *)
-    DESKTOP_PKGS=""
-    DM_SERVICE=""
-    ;;
+  "GNOME") DESKTOP_PKGS="gnome gnome-extra"; DM_SERVICE="gdm.service" ;;
+  "KDE Plasma") DESKTOP_PKGS="plasma kde-applications sddm"; DM_SERVICE="sddm.service" ;;
+  "XFCE") DESKTOP_PKGS="xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm.service" ;;
+  "i3") DESKTOP_PKGS="xorg-server xorg-xinit i3-wm i3status i3lock dmenu alacritty"; DM_SERVICE="" ;;
+  *) DESKTOP_PKGS=""; DM_SERVICE="" ;;
 esac
 
 validate_layout() {
@@ -426,7 +409,6 @@ validate_layout() {
 
 validate_layout
 
-# Confirmação final antes de particionar/formatar
 clear
 ui_style --foreground 220 "Parâmetros coletados. Confirme para aplicar as alterações no disco."
 if ! ui_confirm "Confirmar o particionamento de /dev/$disco e formatar AGORA?"; then
@@ -435,7 +417,6 @@ if ! ui_confirm "Confirmar o particionamento de /dev/$disco e formatar AGORA?"; 
 fi
 
 clear
-# Particionamento (GPT)
 if have gum; then gum spin --spinner dot --title "[1/5] Limpando assinaturas do disco..." -- sleep 1; else sleep 1; fi
 wipefs -a "/dev/$disco" >/dev/null 2>&1
 
@@ -462,9 +443,9 @@ else
   printf '%s' "$sfdisk_script" | sfdisk "/dev/$disco" >/dev/null 2>&1
 fi
 
-# Formatação e montagem em /mnt
 ui_style --foreground "$ACCENT_COLOR" "[2/5] Formatando e Montando em /mnt..."
 
+# A Lógica aqui é segura pois suporta sda1 ou nvme0n1p1 corretamente.
 get_part_path() {
   local n=$1
   if [[ "$disco" =~ [0-9]$ ]]; then
@@ -515,7 +496,6 @@ for ((i = 0; i < num_parts; i++)); do
     ROOT_PART="$part"
     if [[ "${sistemas_fs[i]}" == "4" ]]; then
       ROOT_IS_BTRFS="1"
-      # Btrfs: cria subvolumes e monta layout padrão (@, @home, @snapshots, @log, @cache)
       mount "$part" /mnt
       btrfs subvolume create /mnt/@ >/dev/null
       if ! has_mountpoint "/home"; then
@@ -559,12 +539,10 @@ if [[ ! -d /mnt/boot ]]; then
   mkdir -p /mnt/boot
 fi
 
-# Garante que existe ESP montada em /mnt/boot (para grub-install)
 if ! mountpoint -q /mnt/boot; then
   die "A partição EFI precisa estar montada em /boot (ponto /boot). Selecione /boot para a partição EFI."
 fi
 
-# Instalação do sistema base via pacstrap
 ui_style --foreground "$ACCENT_COLOR" "[3/5] Iniciando o pacstrap. Isso pode demorar um pouco..."
 sleep 2
 
@@ -573,24 +551,21 @@ for fs in "${sistemas_fs[@]}"; do
   [[ "$fs" == "4" ]] && pacotes+=(btrfs-progs)
 done
 [[ -n "$ucode" ]] && pacotes+=("$ucode")
-# drivers (opcional)
+
 if [[ -n "$DRIVER_PKGS" ]]; then
   # shellcheck disable=SC2206
   pacotes+=($DRIVER_PKGS)
 fi
 
-# Bootloader: ajusta pacotes conforme seleção
 if [[ -n "$BOOTLOADER_PKGS" ]]; then
   # shellcheck disable=SC2206
   pacotes+=($BOOTLOADER_PKGS)
 fi
 
-# Não usar gum spin aqui para que o usuário possa ver o progresso do pacman
 pacstrap -K /mnt "${pacotes[@]}"
 
 if have gum; then gum spin --spinner dot --title "Gerando fstab..." -- sh -c "genfstab -U /mnt >> /mnt/etc/fstab"; else genfstab -U /mnt >> /mnt/etc/fstab; fi
 
-# Configuração do sistema via arch-chroot
 ui_style --foreground "$ACCENT_COLOR" "[4/5] Entrando na Matrix (arch-chroot) para configurações finais..."
 sleep 3
 
@@ -663,7 +638,6 @@ LOADER
   limine)
     echo -e "\e[35m-> Instalando o Limine (UEFI)...\e[0m"
     mkdir -p /boot/EFI/BOOT
-    # tenta localizar binário UEFI do limine em paths comuns
     LIMINE_EFI=""
     for p in \
       /usr/share/limine/BOOTX64.EFI \
@@ -715,18 +689,14 @@ for f in 00_install.sh 01_env_utils.sh 02_aur_engine.sh 03_packages.sh 04_ricing
   chmod +x "\$ENV_DIR/\$f" || true
 done
 
-# Executa o env setup durante a instalação, mas direcionando as configs para o usuário criado.
-# Como estamos rodando como root (sem sudo), exportamos SUDO_USER para o detect_target_user.
 export SUDO_USER="$usuario"
 
 echo -e "\e[35m-> Executando env/00_install.sh (root, alvo: \$SUDO_USER)...\e[0m"
 bash "\$ENV_DIR/00_install.sh"
 
-# Atalho para reexecutar depois, caso o usuário queira
 ln -sf "\$ENV_DIR/00_install.sh" /env-setup.sh
 EOF
 
-# Desmontagem de /mnt (término)
 if have gum; then gum spin --spinner dot --title "[5/5] Finalizando e desmontando..." -- umount -R /mnt; else umount -R /mnt; fi
 
 clear
