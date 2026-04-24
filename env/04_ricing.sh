@@ -52,8 +52,7 @@ install_themes_and_cursors() {
 install_oh_my_zsh() {
   if [ ! -d "$TARGET_HOME/.oh-my-zsh" ]; then
     log_info "Instalando Oh My Zsh..."
-    export RUNZSH=no
-    sudo -H -u "$TARGET_USER" bash -c 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended'
+    sudo -H -u "$TARGET_USER" bash -c 'export RUNZSH=no; sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended'
     log_success "Oh My Zsh instalado!"
   else
     ui_style --foreground 245 "⏭️  Oh My Zsh já instalado. Pulando..."
@@ -61,13 +60,13 @@ install_oh_my_zsh() {
 }
 
 install_zsh_plugins() {
-  local zsh_custom="$TARGET_HOME/.oh-my-zsh/custom"
-  
   log_info "Verificando plugins e temas do Zsh..."
   
-  [ ! -d "$zsh_custom/themes/powerlevel10k" ] && sudo -H -u "$TARGET_USER" git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$zsh_custom/themes/powerlevel10k"
-  [ ! -d "$zsh_custom/plugins/zsh-autosuggestions" ] && sudo -H -u "$TARGET_USER" git clone https://github.com/zsh-users/zsh-autosuggestions "$zsh_custom/plugins/zsh-autosuggestions"
-  [ ! -d "$zsh_custom/plugins/fast-syntax-highlighting" ] && sudo -H -u "$TARGET_USER" git clone https://github.com/zdharma-continuum/fast-syntax-highlighting "$zsh_custom/plugins/fast-syntax-highlighting"
+  local zsh_custom="$TARGET_HOME/.oh-my-zsh/custom"
+  
+  sudo -H -u "$TARGET_USER" git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$zsh_custom/themes/powerlevel10k" 2>/dev/null || true
+  sudo -H -u "$TARGET_USER" git clone https://github.com/zsh-users/zsh-autosuggestions "$zsh_custom/plugins/zsh-autosuggestions" 2>/dev/null || true
+  sudo -H -u "$TARGET_USER" git clone https://github.com/zdharma-continuum/fast-syntax-highlighting "$zsh_custom/plugins/fast-syntax-highlighting" 2>/dev/null || true
   
   log_success "Plugins sincronizados."
 }
@@ -76,9 +75,9 @@ install_fonts() {
   log_info "Baixando fontes MesloLGS NF..."
   local font_dir="$TARGET_HOME/.local/share/fonts"
   sudo -H -u "$TARGET_USER" bash -c "
-    mkdir -p \"$font_dir\"
-    cd \"$font_dir\"
-    fonts=(\"Regular\" \"Bold\" \"Italic\" \"Bold%20Italic\")
+    mkdir -p '$font_dir'
+    cd '$font_dir'
+    fonts=('Regular' 'Bold' 'Italic' 'Bold%20Italic')
     for f in \"\${fonts[@]}\"; do
       file_name=\"MesloLGS NF \${f//%20/ }.ttf\"
       if [ ! -f \"\$file_name\" ]; then
