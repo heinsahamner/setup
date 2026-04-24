@@ -51,12 +51,16 @@ install_themes_and_cursors() {
 
 install_oh_my_zsh() {
   if [ ! -d "$TARGET_HOME/.oh-my-zsh" ]; then
-    log_info "Instalando Oh My Zsh..."
-    ui_spin "Baixando framework Oh My Zsh..." \
+    log_info "Instalando Oh My Zsh em $TARGET_HOME..."
+    (
+      set -e
       sudo -H -u "$TARGET_USER" bash -c '
-            export RUNZSH=no
-            sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-        '
+        export RUNZSH=no
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+      '
+    ) || {
+      log_warn "Oh My Zsh install returned non-zero"
+    }
     log_success "Oh My Zsh instalado!"
   else
     ui_style --foreground 245 "⏭️  Oh My Zsh já instalado. Pulando..."
@@ -67,23 +71,32 @@ install_zsh_plugins() {
   log_info "Sincronizando plugins Zsh..."
   local zsh_custom="$TARGET_HOME/.oh-my-zsh/custom"
   
+  log_info "Usando diretório: $zsh_custom"
+  
   if [ ! -d "$zsh_custom" ]; then
-    log_error "Oh My Zsh não instalado. Execute install_oh_my_zsh primeiro."
+    log_error "Oh My Zsh não instalado em $zsh_custom. Execute install_oh_my_zsh primeiro."
     return 1
   fi
-
-  log_info "Clonando plugins no diretório: $zsh_custom"
   
   if [ ! -d "$zsh_custom/themes/powerlevel10k" ]; then
-    ui_spin "Clonando powerlevel10k..." sudo -H -u "$TARGET_USER" git clone -q --depth=1 https://github.com/romkatv/powerlevel10k.git "$zsh_custom/themes/powerlevel10k"
+    log_info "Clonando powerlevel10k..."
+    sudo -H -u "$TARGET_USER" git clone -q --depth=1 https://github.com/romkatv/powerlevel10k.git "$zsh_custom/themes/powerlevel10k" || {
+      log_warn "Falha ao clonar powerlevel10k (verifique a rede)"
+    }
   fi
   
   if [ ! -d "$zsh_custom/plugins/zsh-autosuggestions" ]; then
-    ui_spin "Clonando zsh-autosuggestions..." sudo -H -u "$TARGET_USER" git clone -q https://github.com/zsh-users/zsh-autosuggestions "$zsh_custom/plugins/zsh-autosuggestions"
+    log_info "Clonando zsh-autosuggestions..."
+    sudo -H -u "$TARGET_USER" git clone -q https://github.com/zsh-users/zsh-autosuggestions "$zsh_custom/plugins/zsh-autosuggestions" || {
+      log_warn "Falha ao clonar zsh-autosuggestions"
+    }
   fi
   
   if [ ! -d "$zsh_custom/plugins/fast-syntax-highlighting" ]; then
-    ui_spin "Clonando fast-syntax-highlighting..." sudo -H -u "$TARGET_USER" git clone -q https://github.com/zdharma-continuum/fast-syntax-highlighting "$zsh_custom/plugins/fast-syntax-highlighting"
+    log_info "Clonando fast-syntax-highlighting..."
+    sudo -H -u "$TARGET_USER" git clone -q https://github.com/zdharma-continuum/fast-syntax-highlighting "$zsh_custom/plugins/fast-syntax-highlighting" || {
+      log_warn "Falha ao clonar fast-syntax-highlighting"
+    }
   fi
   
   log_success "Plugins Zsh prontos."
