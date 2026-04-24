@@ -10,7 +10,7 @@
 # Requisitos
 # - Execução como root (sudo)
 # ===============================================================
-set -euo pipefail
+# set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -47,8 +47,8 @@ echo ""
 # Seleção de etapas (interativo quando possível)
 OPT_BASE="1. 📦 Pacotes Base e Atualização"
 OPT_AUR="2. 🛠️  Motor AUR (Apenas Arch)"
-OPT_EXTRA="3. 🧰 Ferramentas Extras (VSCode, Ventoy, NVM, etc)"
-OPT_RICE="4. 🎨 Ricing e Configurações (Zsh, LazyVim, Kitty)"
+OPT_EXTRA="3. 🧰 Ferramentas Extras (VSCode/Ventoy/NVM)"
+OPT_RICE="4. 🎨 Ricing e Configurações (ZSH/LazyVim/Kitty)"
 
 ui_style --foreground 226 "Selecione as etapas que deseja executar:"
 echo -e "Use [Espaço] para marcar/desmarcar e [Enter] para confirmar.\n"
